@@ -23,7 +23,13 @@ DEFAULT_PEARL_MODEL = "pearl-ai/Llama-3.3-70B-Instruct-pearl"
 # Default ports as Pearl's container exposes them (network_mode="host").
 DEFAULT_VLLM_PORT = 8000
 DEFAULT_GATEWAY_RPC_PORT = 8337
-DEFAULT_GATEWAY_METRICS_PORT = 8339
+# Pearl-gateway's Prometheus metrics endpoint. Verified default from
+# pearl/miner/pearl-gateway/src/pearl_gateway/cli.py:72 (status message
+# references http://127.0.0.1:9109/metrics) and pearl/miner/conftest.py
+# line 301 (METRICS_BIND="127.0.0.1:9109"). Spec A's earlier 8339 guess
+# was incorrect — kept the constant name for compatibility but bumped
+# the value.
+DEFAULT_GATEWAY_METRICS_PORT = 9109
 
 # Default pearld RPC endpoint (mainnet).
 DEFAULT_PEARLD_RPC_URL = "http://localhost:44107"

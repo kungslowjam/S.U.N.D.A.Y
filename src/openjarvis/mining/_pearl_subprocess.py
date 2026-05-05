@@ -79,10 +79,12 @@ class PearlSubprocessLauncher:
             self.gateway_port,
             self.metrics_port,
         )
+        # The pearl-gateway CLI takes a positional command argument (start|stop|
+        # status|version) — see pearl/miner/pearl-gateway/src/pearl_gateway/cli.py.
         gateway_log_path = self.log_dir / "pearl-gateway.log"
         with gateway_log_path.open("a", buffering=1) as gateway_log:
             gateway = subprocess.Popen(
-                ["pearl-gateway"],
+                ["pearl-gateway", "start"],
                 env=env,
                 stdout=gateway_log,
                 stderr=subprocess.STDOUT,
@@ -168,20 +170,28 @@ class PearlSubprocessLauncher:
     def _build_gateway_env(self) -> dict[str, str]:
         """Construct the environment passed to pearl-gateway.
 
-        Env-var names here are best-effort; Task 7 verifies them against
-        pearl-gateway's actual ``config.py``.
+        Env var names verified against
+        ``pearl/miner/pearl-gateway/src/pearl_gateway/config.py`` (PearlConfig
+        with ``env_prefix="PEARLD_"`` and MinerRpcConfig with
+        ``env_prefix="MINER_RPC_"``) and the canonical names in
+        ``pearl/miner/conftest.py`` line 281+.
+
+        - PEARLD_*: pearld node RPC connection (PearlConfig)
+        - MINER_RPC_*: the JSON-RPC server miners connect to (MinerRpcConfig)
+        - METRICS_BIND: a single ``HOST:PORT`` string for the Prometheus
+          metrics endpoint (defaults to ``127.0.0.1:9109`` upstream).
         """
         env = dict(os.environ)
         env.update(
             {
-                "PEARL_GATEWAY_HOST": self.gateway_host,
-                "PEARL_GATEWAY_PORT": str(self.gateway_port),
-                "PEARL_GATEWAY_METRICS_PORT": str(self.metrics_port),
                 "PEARLD_RPC_URL": self.pearld_rpc_url,
                 "PEARLD_RPC_USER": self.pearld_rpc_user,
                 "PEARLD_RPC_PASSWORD": self.pearld_rpc_password,
                 "PEARLD_MINING_ADDRESS": self.wallet_address,
                 "MINER_RPC_TRANSPORT": "tcp",
+                "MINER_RPC_HOST": self.gateway_host,
+                "MINER_RPC_PORT": str(self.gateway_port),
+                "METRICS_BIND": f"{self.gateway_host}:{self.metrics_port}",
             }
         )
         return env
