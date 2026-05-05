@@ -1,7 +1,9 @@
 """Tests for openjarvis.mining.cpu_pearl.CpuPearlProvider."""
 from __future__ import annotations
 
-from unittest.mock import patch
+import asyncio
+import json
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -97,3 +99,115 @@ def test_detect_engine_independent(darwin_apple_hw):
                 darwin_apple_hw, engine_id=engine, model="any"
             )
             assert cap.supported is True, f"engine_id={engine!r} should be supported"
+
+
+# ---------------------------------------------------------------------------
+# Task 9: lifecycle tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def cpu_pearl_config():
+    """A minimal MiningConfig for cpu-pearl."""
+    from openjarvis.mining._stubs import MiningConfig, SoloTarget
+    return MiningConfig(
+        provider="cpu-pearl",
+        wallet_address="prl1qtest",
+        submit_target=SoloTarget(pearld_rpc_url="http://localhost:44107"),
+        fee_bps=0,
+        fee_payout_address=None,
+        extra={
+            "gateway_host": "127.0.0.1",
+            "gateway_port": 18337,
+            "metrics_port": 19109,
+            "pearld_rpc_url": "http://localhost:44107",
+            "pearld_rpc_user": "rpcuser",
+            "pearld_rpc_password_env": "TEST_PEARLD_PASSWORD",
+            "m": 256, "n": 128, "k": 1024, "rank": 32,
+        },
+    )
+
+
+def test_start_writes_sidecar_and_is_running(cpu_pearl_config, tmp_path, monkeypatch):
+    """After start(), is_running() returns True and sidecar JSON is on disk."""
+    from openjarvis.mining.cpu_pearl import CpuPearlProvider
+
+    sidecar = tmp_path / "mining.json"
+    log_dir = tmp_path / "logs"
+    monkeypatch.setattr("openjarvis.mining.cpu_pearl._sidecar_path", lambda: sidecar)
+    monkeypatch.setattr("openjarvis.mining.cpu_pearl._log_dir", lambda: log_dir)
+    monkeypatch.setenv("TEST_PEARLD_PASSWORD", "secret")
+
+    fake_launcher = MagicMock()
+    fake_launcher.is_running.return_value = True
+    fake_launcher.pids.return_value = (11111, 22222)
+
+    _target = "openjarvis.mining.cpu_pearl.PearlSubprocessLauncher"
+    with patch(_target, return_value=fake_launcher):
+        provider = CpuPearlProvider()
+        asyncio.run(provider.start(cpu_pearl_config))
+        assert provider.is_running() is True
+
+    assert sidecar.exists()
+    payload = json.loads(sidecar.read_text())
+    assert payload["provider"] == "cpu-pearl"
+    assert payload["wallet_address"] == "prl1qtest"
+    assert payload["gateway_pid"] == 11111
+    assert payload["miner_loop_pid"] == 22222
+    # Secret must NOT be in sidecar
+    assert "secret" not in sidecar.read_text()
+
+
+def test_stop_terminates_and_removes_sidecar(cpu_pearl_config, tmp_path, monkeypatch):
+    """After stop(), is_running() returns False, sidecar is removed."""
+    from openjarvis.mining.cpu_pearl import CpuPearlProvider
+
+    sidecar = tmp_path / "mining.json"
+    log_dir = tmp_path / "logs"
+    monkeypatch.setattr("openjarvis.mining.cpu_pearl._sidecar_path", lambda: sidecar)
+    monkeypatch.setattr("openjarvis.mining.cpu_pearl._log_dir", lambda: log_dir)
+    monkeypatch.setenv("TEST_PEARLD_PASSWORD", "secret")
+
+    fake_launcher = MagicMock()
+    fake_launcher.is_running.side_effect = [True, False]
+    fake_launcher.pids.return_value = (11111, 22222)
+
+    _target = "openjarvis.mining.cpu_pearl.PearlSubprocessLauncher"
+    with patch(_target, return_value=fake_launcher):
+        provider = CpuPearlProvider()
+        asyncio.run(provider.start(cpu_pearl_config))
+        asyncio.run(provider.stop())
+        fake_launcher.stop.assert_called_once()
+        assert provider.is_running() is False
+        assert not sidecar.exists()
+
+
+def test_stats_returns_zero_stats_when_not_running():
+    """stats() before start() returns a MiningStats with provider_id and zeros."""
+    from openjarvis.mining.cpu_pearl import CpuPearlProvider
+
+    provider = CpuPearlProvider()
+    stats = provider.stats()
+    assert stats.provider_id == "cpu-pearl"
+    assert stats.shares_submitted == 0
+    assert stats.shares_accepted == 0
+
+
+def test_parse_gateway_metrics_extracts_counters():
+    """The Prometheus parser extracts the metric names we expect."""
+    from openjarvis.mining.cpu_pearl import _parse_gateway_metrics
+
+    sample = """\
+# HELP pearl_gateway_shares_submitted_total Total shares submitted.
+# TYPE pearl_gateway_shares_submitted_total counter
+pearl_gateway_shares_submitted_total 42
+# HELP pearl_gateway_shares_accepted_total Total shares accepted.
+# TYPE pearl_gateway_shares_accepted_total counter
+pearl_gateway_shares_accepted_total 40
+pearl_gateway_blocks_found_total 1
+"""
+    stats = _parse_gateway_metrics(sample, provider_id="cpu-pearl")
+    assert stats.provider_id == "cpu-pearl"
+    assert stats.shares_submitted == 42
+    assert stats.shares_accepted == 40
+    assert stats.blocks_found == 1
