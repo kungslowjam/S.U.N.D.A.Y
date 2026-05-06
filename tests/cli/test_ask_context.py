@@ -1,4 +1,4 @@
-"""Tests for context injection integration in ``jarvis ask``."""
+"""Tests for context injection integration in ``sunday ask``."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import importlib
 
 from click.testing import CliRunner
 
-from openjarvis.cli import cli
+from sunday.cli import cli
 
 
 def test_ask_no_context_flag():
@@ -35,9 +35,9 @@ def test_get_memory_backend_returns_backend_even_when_empty(
     which is the kind of ambiguity that leads to silent grounding
     failures downstream.
     """
-    from openjarvis.core.config import JarvisConfig, MemoryConfig
-    from openjarvis.core.registry import MemoryRegistry
-    from openjarvis.tools.storage.sqlite import SQLiteMemory
+    from sunday.core.config import JarvisConfig, MemoryConfig
+    from sunday.core.registry import MemoryRegistry
+    from sunday.tools.storage.sqlite import SQLiteMemory
 
     if not MemoryRegistry.contains("sqlite"):
         MemoryRegistry.register_value("sqlite", SQLiteMemory)
@@ -47,7 +47,7 @@ def test_get_memory_backend_returns_backend_even_when_empty(
         db_path=str(tmp_path / "empty.db"),
     )
 
-    mod = importlib.import_module("openjarvis.cli.ask")
+    mod = importlib.import_module("sunday.cli.ask")
     result = mod._get_memory_backend(config)
     assert result is not None
     # An empty backend should still retrieve cleanly (zero hits).
@@ -61,9 +61,9 @@ def test_get_memory_backend_returns_backend_with_docs(
     monkeypatch,
 ):
     """_get_memory_backend returns a backend when docs exist."""
-    from openjarvis.core.config import JarvisConfig, MemoryConfig
-    from openjarvis.core.registry import MemoryRegistry
-    from openjarvis.tools.storage.sqlite import SQLiteMemory
+    from sunday.core.config import JarvisConfig, MemoryConfig
+    from sunday.core.registry import MemoryRegistry
+    from sunday.tools.storage.sqlite import SQLiteMemory
 
     if not MemoryRegistry.contains("sqlite"):
         MemoryRegistry.register_value("sqlite", SQLiteMemory)
@@ -77,7 +77,7 @@ def test_get_memory_backend_returns_backend_with_docs(
     backend.store("test document content")
     backend.close()
 
-    mod = importlib.import_module("openjarvis.cli.ask")
+    mod = importlib.import_module("sunday.cli.ask")
     result = mod._get_memory_backend(config)
     assert result is not None
     if hasattr(result, "close"):

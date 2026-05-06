@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from openjarvis.tools.apply_patch import ApplyPatchTool
+from sunday.tools.apply_patch import ApplyPatchTool
 
 
 class TestApplyPatchTool:

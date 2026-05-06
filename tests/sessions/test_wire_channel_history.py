@@ -7,10 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openjarvis.core.config import JarvisConfig
-from openjarvis.core.events import EventBus
-from openjarvis.core.types import Role
-from openjarvis.system import JarvisSystem
+from sunday.core.config import JarvisConfig
+from sunday.core.events import EventBus
+from sunday.core.types import Role
+from sunday.system import JarvisSystem
 
 
 @pytest.fixture()
@@ -30,7 +30,7 @@ def minimal_system():
 class TestWireChannelHistory:
     def test_prior_messages_passed_to_ask(self, tmp_path, minimal_system):
         """Session history is forwarded as prior_messages to ask()."""
-        from openjarvis.sessions.session import SessionStore
+        from sunday.sessions.session import SessionStore
 
         db = tmp_path / "sessions.db"
         store = SessionStore(db_path=db)
@@ -80,7 +80,7 @@ class TestWireChannelHistory:
 
     def test_empty_session_passes_empty_prior_messages(self, tmp_path, minimal_system):
         """First message in a new session passes prior_messages=[]."""
-        from openjarvis.sessions.session import SessionStore
+        from sunday.sessions.session import SessionStore
 
         db = tmp_path / "sessions.db"
         store = SessionStore(db_path=db)

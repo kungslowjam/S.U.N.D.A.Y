@@ -5,7 +5,7 @@ from __future__ import annotations
 import textwrap
 from pathlib import Path
 
-from openjarvis.core.config import ChannelConfig, JarvisConfig, load_config
+from sunday.core.config import ChannelConfig, JarvisConfig, load_config
 
 
 class TestChannelConfigDefaults:
@@ -24,12 +24,12 @@ class TestChannelConfigDefaults:
 
 
 class TestChannelConfigInJarvisConfig:
-    def test_channel_config_in_jarvis_config(self) -> None:
+    def test_channel_config_in_sunday_config(self) -> None:
         cfg = JarvisConfig()
         assert hasattr(cfg, "channel")
         assert isinstance(cfg.channel, ChannelConfig)
 
-    def test_jarvis_config_channel_defaults(self) -> None:
+    def test_sunday_config_channel_defaults(self) -> None:
         cfg = JarvisConfig()
         assert cfg.channel.enabled is False
         assert cfg.channel.default_channel == ""

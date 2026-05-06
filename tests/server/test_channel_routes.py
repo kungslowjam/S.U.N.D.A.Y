@@ -10,9 +10,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-pytest.importorskip("fastapi", reason="openjarvis[server] not installed")
+pytest.importorskip("fastapi", reason="sunday[server] not installed")
 
-from openjarvis.channels._stubs import ChannelStatus  # noqa: E402
+from sunday.channels._stubs import ChannelStatus  # noqa: E402
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ def mock_bridge():
 @pytest.fixture
 def app_with_bridge(mock_engine, mock_bridge):
     """FastAPI app with channel bridge configured."""
-    from openjarvis.server.app import create_app
+    from sunday.server.app import create_app
 
     return create_app(
         mock_engine,
@@ -56,7 +56,7 @@ def app_with_bridge(mock_engine, mock_bridge):
 @pytest.fixture
 def app_without_bridge(mock_engine):
     """FastAPI app without channel bridge."""
-    from openjarvis.server.app import create_app
+    from sunday.server.app import create_app
 
     return create_app(mock_engine, "test-model")
 

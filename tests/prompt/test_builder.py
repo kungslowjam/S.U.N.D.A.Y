@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from openjarvis.core.config import MemoryFilesConfig, SystemPromptConfig
+from sunday.core.config import MemoryFilesConfig, SystemPromptConfig
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def memory_dir(tmp_path: Path) -> Path:
 
 
 def test_build_frozen_prefix(memory_dir: Path):
-    from openjarvis.prompt.builder import SystemPromptBuilder
+    from sunday.prompt.builder import SystemPromptBuilder
 
     builder = SystemPromptBuilder(
         agent_template="You are Jarvis.",
@@ -38,7 +38,7 @@ def test_build_frozen_prefix(memory_dir: Path):
 
 
 def test_frozen_prefix_stability(memory_dir: Path):
-    from openjarvis.prompt.builder import SystemPromptBuilder
+    from sunday.prompt.builder import SystemPromptBuilder
 
     builder = SystemPromptBuilder(
         agent_template="You are Jarvis.",
@@ -56,7 +56,7 @@ def test_frozen_prefix_stability(memory_dir: Path):
 
 
 def test_char_limit_truncation(memory_dir: Path):
-    from openjarvis.prompt.builder import SystemPromptBuilder
+    from sunday.prompt.builder import SystemPromptBuilder
 
     (memory_dir / "SOUL.md").write_text("x" * 10000)
     builder = SystemPromptBuilder(
@@ -74,7 +74,7 @@ def test_char_limit_truncation(memory_dir: Path):
 
 
 def test_skill_index_in_prompt(memory_dir: Path):
-    from openjarvis.prompt.builder import SystemPromptBuilder
+    from sunday.prompt.builder import SystemPromptBuilder
 
     skills = [("api_health_check", "Check API health across all endpoints")]
     builder = SystemPromptBuilder(
@@ -93,7 +93,7 @@ def test_skill_index_in_prompt(memory_dir: Path):
 
 
 def test_dynamic_section_appended(memory_dir: Path):
-    from openjarvis.prompt.builder import SystemPromptBuilder
+    from sunday.prompt.builder import SystemPromptBuilder
 
     builder = SystemPromptBuilder(
         agent_template="You are Jarvis.",
@@ -110,7 +110,7 @@ def test_dynamic_section_appended(memory_dir: Path):
 
 
 def test_missing_files_handled(tmp_path: Path):
-    from openjarvis.prompt.builder import SystemPromptBuilder
+    from sunday.prompt.builder import SystemPromptBuilder
 
     builder = SystemPromptBuilder(
         agent_template="You are Jarvis.",

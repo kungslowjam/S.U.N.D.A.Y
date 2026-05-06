@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from openjarvis.telemetry.session import (
+from sunday.telemetry.session import (
     TelemetrySample,
     TelemetrySession,
     _PythonRingBuffer,

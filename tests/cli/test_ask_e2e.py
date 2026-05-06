@@ -1,4 +1,4 @@
-"""End-to-end tests for ``jarvis ask``."""
+"""End-to-end tests for ``sunday ask``."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from unittest import mock
 
 from click.testing import CliRunner
 
-from openjarvis.cli import cli
-from openjarvis.core.config import JarvisConfig
+from sunday.cli import cli
+from sunday.core.config import JarvisConfig
 
 # Import the actual module (not the Click command attribute)
-_ask_mod = importlib.import_module("openjarvis.cli.ask")
+_ask_mod = importlib.import_module("sunday.cli.ask")
 
 
 def _mock_engine_response():

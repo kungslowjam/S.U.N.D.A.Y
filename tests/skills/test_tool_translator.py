@@ -1,8 +1,8 @@
-"""Tests for ToolTranslator — translate external tool names to OpenJarvis."""
+"""Tests for ToolTranslator — translate external tool names to SUNDAY."""
 
 from __future__ import annotations
 
-from openjarvis.skills.tool_translator import TOOL_TRANSLATION, ToolTranslator
+from sunday.skills.tool_translator import TOOL_TRANSLATION, ToolTranslator
 
 
 class TestTranslationTable:

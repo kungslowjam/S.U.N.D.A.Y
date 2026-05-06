@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from openjarvis.connectors.obsidian import ObsidianConnector
-from openjarvis.connectors.pipeline import IngestionPipeline
-from openjarvis.connectors.store import KnowledgeStore
-from openjarvis.connectors.sync_engine import SyncEngine
-from openjarvis.tools.knowledge_search import KnowledgeSearchTool
+from sunday.connectors.obsidian import ObsidianConnector
+from sunday.connectors.pipeline import IngestionPipeline
+from sunday.connectors.store import KnowledgeStore
+from sunday.connectors.sync_engine import SyncEngine
+from sunday.tools.knowledge_search import KnowledgeSearchTool
 
 # ---------------------------------------------------------------------------
 # Fixtures

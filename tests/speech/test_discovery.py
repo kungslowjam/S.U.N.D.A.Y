@@ -2,17 +2,17 @@
 
 from unittest.mock import patch
 
-from openjarvis.core.config import JarvisConfig
+from sunday.core.config import JarvisConfig
 
 
 def test_get_speech_backend_explicit():
     """Explicit backend selection works."""
-    from openjarvis.speech._discovery import get_speech_backend
+    from sunday.speech._discovery import get_speech_backend
 
     config = JarvisConfig()
     config.speech.backend = "faster-whisper"
 
-    with patch("openjarvis.speech._discovery._create_backend") as mock_create:
+    with patch("sunday.speech._discovery._create_backend") as mock_create:
         mock_backend = type(
             "MockBackend",
             (),
@@ -30,7 +30,7 @@ def test_get_speech_backend_explicit():
 
 def test_get_speech_backend_returns_none_if_nothing_available():
     """Returns None when no backend can be created."""
-    from openjarvis.speech._discovery import get_speech_backend
+    from sunday.speech._discovery import get_speech_backend
 
     config = JarvisConfig()
     config.speech.backend = "nonexistent"
@@ -41,7 +41,7 @@ def test_get_speech_backend_returns_none_if_nothing_available():
 
 def test_auto_discovery_priority():
     """Auto mode tries backends in priority order."""
-    from openjarvis.speech._discovery import DISCOVERY_ORDER
+    from sunday.speech._discovery import DISCOVERY_ORDER
 
     assert DISCOVERY_ORDER[0] == "faster-whisper"
     assert "openai" in DISCOVERY_ORDER

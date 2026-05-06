@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from openjarvis.learning.intelligence.orchestrator.reward import (
+from sunday.learning.intelligence.orchestrator.reward import (
     AdaptiveRewardWeights,
     MultiObjectiveReward,
     Normalizers,
     RewardWeights,
 )
-from openjarvis.learning.intelligence.orchestrator.types import (
+from sunday.learning.intelligence.orchestrator.types import (
     Episode,
 )
 

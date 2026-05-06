@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# install.sh — OpenJarvis curl-pipe-bash installer.
+# install.sh — SUNDAY curl-pipe-bash installer.
 #
 # Usage:
-#   curl -fsSL https://openjarvis.ai/install.sh | bash
+#   curl -fsSL https://sunday.ai/install.sh | bash
 #
 # Flags (only used in tests / power users):
 #   --no-bg-orchestrator   Skip the detached background orchestrator
@@ -10,9 +10,9 @@
 #   --force                Re-run all steps even if state file says done
 #
 # Environment overrides:
-#   OPENJARVIS_HOME        Install dir (default: $HOME/.openjarvis)
-#   OPENJARVIS_REPO_URL    git repo URL (default: https://github.com/open-jarvis/OpenJarvis.git)
-#   OPENJARVIS_FORCE_WSL   Set 1 to force WSL detection (testing)
+#   OPENSUNDAY_HOME        Install dir (default: $HOME/.sunday)
+#   OPENSUNDAY_REPO_URL    git repo URL (default: https://github.com/open-sunday/SUNDAY.git)
+#   OPENSUNDAY_FORCE_WSL   Set 1 to force WSL detection (testing)
 
 set -euo pipefail
 
@@ -34,7 +34,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
     cat >&2 <<'EOF'
 install.sh: don't run as root.
 
-OpenJarvis installs to $HOME/.openjarvis, not /usr/local. Re-run as your
+SUNDAY installs to $HOME/.sunday, not /usr/local. Re-run as your
 regular user (without sudo).
 EOF
     exit 1
@@ -59,19 +59,19 @@ need git
 need curl
 
 # ---- env ----
-OPENJARVIS_HOME="${OPENJARVIS_HOME:-$HOME/.openjarvis}"
-OPENJARVIS_REPO_URL="${OPENJARVIS_REPO_URL:-https://github.com/open-jarvis/OpenJarvis.git}"
-SRC_DIR="$OPENJARVIS_HOME/src"
-VENV_DIR="$OPENJARVIS_HOME/.venv"
-STATE_DIR="$OPENJARVIS_HOME/.state"
-SCRIPTS_DIR="$OPENJARVIS_HOME/.scripts"
+OPENSUNDAY_HOME="${OPENSUNDAY_HOME:-$HOME/.sunday}"
+OPENSUNDAY_REPO_URL="${OPENSUNDAY_REPO_URL:-https://github.com/open-sunday/SUNDAY.git}"
+SRC_DIR="$OPENSUNDAY_HOME/src"
+VENV_DIR="$OPENSUNDAY_HOME/.venv"
+STATE_DIR="$OPENSUNDAY_HOME/.state"
+SCRIPTS_DIR="$OPENSUNDAY_HOME/.scripts"
 STATE_FILE="$STATE_DIR/install-state.json"
 
-mkdir -p "$OPENJARVIS_HOME" "$STATE_DIR" "$SCRIPTS_DIR"
+mkdir -p "$OPENSUNDAY_HOME" "$STATE_DIR" "$SCRIPTS_DIR"
 
 # ---- WSL detection ----
 WSL=0
-if [[ "${OPENJARVIS_FORCE_WSL:-0}" == "1" ]]; then
+if [[ "${OPENSUNDAY_FORCE_WSL:-0}" == "1" ]]; then
     WSL=1
 elif [[ -f /proc/sys/kernel/osrelease ]] && grep -qi "microsoft" /proc/sys/kernel/osrelease 2>/dev/null; then
     WSL=1
@@ -127,7 +127,7 @@ clone_repo() {
         echo "    repo already at $SRC_DIR"
         return 0
     fi
-    git clone --depth 1 "$OPENJARVIS_REPO_URL" "$SRC_DIR"
+    git clone --depth 1 "$OPENSUNDAY_REPO_URL" "$SRC_DIR"
 }
 
 copy_scripts() {
@@ -175,15 +175,15 @@ pull_default_model() {
 }
 
 write_config() {
-    "$VENV_DIR/bin/jarvis" _bootstrap --write-config \
+    "$VENV_DIR/bin/sunday" _bootstrap --write-config \
         --engine ollama --model qwen3.5:2b \
         --prefer-cloud-when-available
 }
 
 install_symlinks() {
     mkdir -p "$HOME/.local/bin"
-    ln -sf "$SCRIPTS_DIR/jarvis-wrapper.sh" "$HOME/.local/bin/jarvis"
-    ln -sf "$SCRIPTS_DIR/jarvis-uninstall.sh" "$HOME/.local/bin/jarvis-uninstall"
+    ln -sf "$SCRIPTS_DIR/sunday-wrapper.sh" "$HOME/.local/bin/sunday"
+    ln -sf "$SCRIPTS_DIR/sunday-uninstall.sh" "$HOME/.local/bin/sunday-uninstall"
 }
 
 ensure_path() {
@@ -196,12 +196,12 @@ ensure_path() {
     else
         rc="$HOME/.bashrc"
     fi
-    if grep -q "OpenJarvis" "$rc" 2>/dev/null; then
+    if grep -q "SUNDAY" "$rc" 2>/dev/null; then
         return 0
     fi
     {
         echo ''
-        echo '# OpenJarvis'
+        echo '# SUNDAY'
         echo 'export PATH="$HOME/.local/bin:$PATH"'
     } >> "$rc"
     echo "    Added ~/.local/bin to PATH in $rc — run: source $rc"
@@ -214,7 +214,7 @@ detach_bg_orchestrator() {
     fi
     local models
     models=$("$VENV_DIR/bin/python" - <<'PYEOF' 2>/dev/null || true
-from openjarvis.core.config import detect_hardware, recommend_model
+from sunday.core.config import detect_hardware, recommend_model
 hw = detect_hardware()
 tier = recommend_model(hw, "ollama")
 TIERS = ["qwen3.5:2b", "qwen3.5:4b", "qwen3.5:9b", "qwen3.5:27b"]
@@ -235,16 +235,16 @@ PYEOF
 }
 
 # ---- run ----
-echo "OpenJarvis installer"
-echo "  install dir: $OPENJARVIS_HOME"
+echo "SUNDAY installer"
+echo "  install dir: $OPENSUNDAY_HOME"
 echo "  WSL2:        $WSL"
 echo
 
 step install_uv         "Install uv"            install_uv
-step clone_repo         "Clone OpenJarvis repo" clone_repo
+step clone_repo         "Clone SUNDAY repo" clone_repo
 step copy_scripts       "Copy install scripts"  copy_scripts
 step create_venv        "Create venv"           create_venv
-step editable_install   "Install OpenJarvis"    editable_install
+step editable_install   "Install SUNDAY"    editable_install
 step install_ollama     "Install Ollama"        install_ollama
 step start_ollama       "Start Ollama daemon"   start_ollama
 step pull_default_model "Pull qwen3.5:2b"       pull_default_model
@@ -255,10 +255,10 @@ step detach_bg_orchestrator "Detach background work" detach_bg_orchestrator
 
 cat <<EOF
 
-Done. Type 'jarvis' to start chatting.
+Done. Type 'sunday' to start chatting.
 
 Background work continues silently:
   - Rust toolchain + maturin extension build
   - Bigger model downloads
-  Run 'jarvis doctor' to check status anytime.
+  Run 'sunday doctor' to check status anytime.
 EOF

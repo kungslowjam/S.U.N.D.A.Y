@@ -1,0 +1,32 @@
+[package]
+name = "sunday-python"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "sunday_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+sunday-core = { path = "../sunday-core" }
+sunday-engine = { path = "../sunday-engine" }
+sunday-security = { path = "../sunday-security" }
+sunday-tools = { path = "../sunday-tools" }
+sunday-agents = { path = "../sunday-agents" }
+sunday-traces = { path = "../sunday-traces" }
+sunday-telemetry = { path = "../sunday-telemetry" }
+sunday-learning = { path = "../sunday-learning" }
+sunday-mcp = { path = "../sunday-mcp" }
+sunday-sessions = { path = "../sunday-sessions" }
+sunday-workflow = { path = "../sunday-workflow" }
+sunday-skills = { path = "../sunday-skills" }
+sunday-recipes = { path = "../sunday-recipes" }
+sunday-templates = { path = "../sunday-templates" }
+sunday-a2a = { path = "../sunday-a2a" }
+sunday-scheduler = { path = "../sunday-scheduler" }
+pyo3 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }

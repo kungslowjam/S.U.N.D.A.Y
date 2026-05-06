@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from openjarvis.mcp.protocol import (
+from sunday.mcp.protocol import (
     INVALID_PARAMS,
     METHOD_NOT_FOUND,
     MCPRequest,
 )
-from openjarvis.mcp.server import MCPServer
-from openjarvis.tools.calculator import CalculatorTool
-from openjarvis.tools.think import ThinkTool
+from sunday.mcp.server import MCPServer
+from sunday.tools.calculator import CalculatorTool
+from sunday.tools.think import ThinkTool
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ class TestMCPServer:
         assert "protocolVersion" in result
         assert "capabilities" in result
         assert "serverInfo" in result
-        assert result["serverInfo"]["name"] == "openjarvis"
+        assert result["serverInfo"]["name"] == "sunday"
 
     def test_initialize_capabilities(self, server):
         req = MCPRequest(method="initialize", id=1)

@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from openjarvis.core.config import JarvisConfig
-from openjarvis.core.events import EventBus
-from openjarvis.system import JarvisSystem, SystemBuilder
+from sunday.core.config import JarvisConfig
+from sunday.core.events import EventBus
+from sunday.system import JarvisSystem, SystemBuilder
 
 
 class TestJarvisSystem:
@@ -85,8 +85,8 @@ class TestJarvisSystem:
 
     def test_ask_with_agent_override(self):
         """Passing agent= param should use that agent even if system has a default."""
-        from openjarvis.agents._stubs import AgentResult
-        from openjarvis.core.registry import AgentRegistry
+        from sunday.agents._stubs import AgentResult
+        from sunday.core.registry import AgentRegistry
 
         class TestAgent:
             agent_id = "test-system-agent"
@@ -280,7 +280,7 @@ class TestSystemBuilder:
         assert builder._traces is False
 
     def test_import_works(self):
-        from openjarvis.system import JarvisSystem, SystemBuilder
+        from sunday.system import JarvisSystem, SystemBuilder
 
         assert JarvisSystem is not None
         assert SystemBuilder is not None

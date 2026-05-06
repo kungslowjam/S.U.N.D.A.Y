@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from openjarvis.agents._stubs import (
+from sunday.agents._stubs import (
     AgentContext,
     AgentResult,
     BaseAgent,
     ToolUsingAgent,
 )
-from openjarvis.core.events import EventBus, EventType
-from openjarvis.core.types import Conversation, Message, Role, ToolCall, ToolResult
-from openjarvis.tools._stubs import BaseTool, ToolSpec
+from sunday.core.events import EventBus, EventType
+from sunday.core.types import Conversation, Message, Role, ToolCall, ToolResult
+from sunday.tools._stubs import BaseTool, ToolSpec
 
 # ---------------------------------------------------------------------------
 # Concrete subclass for testing
@@ -163,11 +163,11 @@ class TestBuildMessages:
         assert messages[1].role == Role.USER
 
     def test_empty_config_default_no_system_message(self, monkeypatch):
-        from openjarvis.core.config import JarvisConfig
+        from sunday.core.config import JarvisConfig
 
         empty_cfg = JarvisConfig()
         empty_cfg.agent.default_system_prompt = ""
-        monkeypatch.setattr("openjarvis.agents._stubs.load_config", lambda: empty_cfg)
+        monkeypatch.setattr("sunday.agents._stubs.load_config", lambda: empty_cfg)
 
         engine = MagicMock()
         agent = _ConcreteAgent(engine, "m")

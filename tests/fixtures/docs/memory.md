@@ -1,6 +1,6 @@
 # Memory and Retrieval
 
-OpenJarvis stores facts the agent has learned so it can retrieve them later.
+SUNDAY stores facts the agent has learned so it can retrieve them later.
 
 ## Backends
 

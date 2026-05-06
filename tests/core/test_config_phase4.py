@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from openjarvis.core.config import (
+from sunday.core.config import (
     HardwareInfo,
     JarvisConfig,
     LearningConfig,
@@ -35,7 +35,7 @@ class TestLearningConfig:
         assert cfg.metrics.cost_weight == 0.3
         assert cfg.metrics.efficiency_weight == 0.3
 
-    def test_jarvis_config_has_learning(self) -> None:
+    def test_sunday_config_has_learning(self) -> None:
         cfg = JarvisConfig()
         assert hasattr(cfg, "learning")
         assert isinstance(cfg.learning, LearningConfig)

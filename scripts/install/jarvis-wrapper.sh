@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# jarvis-wrapper.sh — symlinked to ~/.local/bin/jarvis.
-# Activates the managed venv and execs the real jarvis CLI.
+# sunday-wrapper.sh — symlinked to ~/.local/bin/sunday.
+# Activates the managed venv and execs the real sunday CLI.
 
-OPENJARVIS_HOME="${OPENJARVIS_HOME:-$HOME/.openjarvis}"
-VENV="$OPENJARVIS_HOME/.venv"
+OPENSUNDAY_HOME="${OPENSUNDAY_HOME:-$HOME/.sunday}"
+VENV="$OPENSUNDAY_HOME/.venv"
 
 if [[ ! -d "$VENV" ]]; then
-    echo "jarvis: venv not found at $VENV" >&2
-    echo "Re-run the installer: curl -fsSL https://openjarvis.ai/install.sh | bash" >&2
+    echo "sunday: venv not found at $VENV" >&2
+    echo "Re-run the installer: curl -fsSL https://sunday.ai/install.sh | bash" >&2
     exit 1
 fi
 
-exec "$VENV/bin/jarvis" "$@"
+exec "$VENV/bin/sunday" "$@"

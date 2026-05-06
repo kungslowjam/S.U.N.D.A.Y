@@ -1,4 +1,4 @@
-"""Tests for the ``jarvis mine`` CLI."""
+"""Tests for the ``sunday mine`` CLI."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
-from openjarvis.cli import cli
-from openjarvis.mining import Sidecar
+from sunday.cli import cli
+from sunday.mining import Sidecar
 
 
 def test_mine_help() -> None:
@@ -50,7 +50,7 @@ def test_mine_inspect_model_validated_artifact_passes(monkeypatch) -> None:
             }
         }
 
-    monkeypatch.setattr("openjarvis.cli.mine_cmd._hf_json", fake_hf_json)
+    monkeypatch.setattr("sunday.cli.mine_cmd._hf_json", fake_hf_json)
 
     result = CliRunner().invoke(cli, ["mine", "inspect-model", "--model", model])
 
@@ -77,7 +77,7 @@ def test_mine_inspect_model_gemma4_requires_processor_metadata(monkeypatch) -> N
             }
         }
 
-    monkeypatch.setattr("openjarvis.cli.mine_cmd._hf_json", fake_hf_json)
+    monkeypatch.setattr("sunday.cli.mine_cmd._hf_json", fake_hf_json)
 
     result = CliRunner().invoke(
         cli,
@@ -108,7 +108,7 @@ def test_mine_init_writes_mining_config(tmp_path: Path) -> None:
             "--pearld-rpc-password-env",
             "TEST_PEARLD_PASSWORD",
         ],
-        env={"OPENJARVIS_CONFIG": str(config_path)},
+        env={"OPENSUNDAY_CONFIG": str(config_path)},
     )
 
     assert result.exit_code == 0
@@ -122,25 +122,25 @@ def test_mine_init_writes_mining_config(tmp_path: Path) -> None:
 def test_mine_init_writes_cuda_visible_devices_for_vllm(
     tmp_path: Path,
 ) -> None:
-    from openjarvis.mining._stubs import MiningCapabilities
+    from sunday.mining._stubs import MiningCapabilities
 
     config_path = tmp_path / "config.toml"
 
     with (
-        patch("openjarvis.cli.mine_cmd._detect_hardware"),
+        patch("sunday.cli.mine_cmd._detect_hardware"),
         patch(
-            "openjarvis.cli.mine_cmd.detect_for_engine_model",
+            "sunday.cli.mine_cmd.detect_for_engine_model",
             return_value=MiningCapabilities(supported=True),
         ),
         patch(
-            "openjarvis.cli.mine_cmd.check_docker_available",
+            "sunday.cli.mine_cmd.check_docker_available",
             return_value=(True, ""),
         ),
-        patch("openjarvis.cli.mine_cmd.check_disk_free", return_value=(True, "")),
-        patch("openjarvis.cli.mine_cmd._docker_from_env", return_value=MagicMock()),
+        patch("sunday.cli.mine_cmd.check_disk_free", return_value=(True, "")),
+        patch("sunday.cli.mine_cmd._docker_from_env", return_value=MagicMock()),
         patch(
-            "openjarvis.cli.mine_cmd.PearlDockerLauncher.ensure_image",
-            return_value="openjarvis/pearl-miner:master",
+            "sunday.cli.mine_cmd.PearlDockerLauncher.ensure_image",
+            return_value="sunday/pearl-miner:master",
         ),
     ):
         result = CliRunner().invoke(
@@ -161,7 +161,7 @@ def test_mine_init_writes_cuda_visible_devices_for_vllm(
                 "--cuda-visible-devices",
                 "0,1",
             ],
-            env={"OPENJARVIS_CONFIG": str(config_path)},
+            env={"OPENSUNDAY_CONFIG": str(config_path)},
         )
 
     assert result.exit_code == 0
@@ -189,7 +189,7 @@ metrics_port = 19109
 """
     )
     sidecar_path = tmp_path / "mining.json"
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
 
     started_configs = []
 
@@ -200,17 +200,17 @@ metrics_port = 19109
     provider_cls = MagicMock(return_value=fake_provider)
     fake_provider.start = fake_start
 
-    with patch("openjarvis.cli.mine_cmd._provider_ids", return_value=("cpu-pearl",)):
-        with patch("openjarvis.cli.mine_cmd.MinerRegistry.contains", return_value=True):
+    with patch("sunday.cli.mine_cmd._provider_ids", return_value=("cpu-pearl",)):
+        with patch("sunday.cli.mine_cmd.MinerRegistry.contains", return_value=True):
             with patch(
-                "openjarvis.cli.mine_cmd.MinerRegistry.get",
+                "sunday.cli.mine_cmd.MinerRegistry.get",
                 return_value=provider_cls,
             ):
                 result = CliRunner().invoke(
                     cli,
                     ["mine", "start"],
                     env={
-                        "OPENJARVIS_CONFIG": str(config_path),
+                        "OPENSUNDAY_CONFIG": str(config_path),
                         "TEST_PEARLD_PASSWORD": "secret",
                     },
                 )
@@ -234,15 +234,15 @@ def test_mine_status_reports_sidecar_and_metrics(tmp_path: Path, monkeypatch) ->
             "miner_loop_pid": 222,
         },
     )
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
-    monkeypatch.setattr("openjarvis.cli.mine_cmd._pid_alive", lambda pid: True)
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
+    monkeypatch.setattr("sunday.cli.mine_cmd._pid_alive", lambda pid: True)
 
     stats = MagicMock()
     stats.shares_submitted = 3
     stats.shares_accepted = 2
     stats.blocks_found = 1
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._stats_from_metrics_url",
+        "sunday.cli.mine_cmd._stats_from_metrics_url",
         lambda url, provider_id: (stats, None),
     )
 
@@ -266,13 +266,13 @@ def test_mine_stop_terminates_pids_and_removes_sidecar(
             "miner_loop_pid": 222,
         },
     )
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
     terminated: list[int] = []
 
     def fake_terminate(pid, *, grace_seconds):
         terminated.append(pid)
 
-    monkeypatch.setattr("openjarvis.cli.mine_cmd._terminate_pid", fake_terminate)
+    monkeypatch.setattr("sunday.cli.mine_cmd._terminate_pid", fake_terminate)
 
     result = CliRunner().invoke(cli, ["mine", "stop"])
 
@@ -283,22 +283,22 @@ def test_mine_stop_terminates_pids_and_removes_sidecar(
 
 def test_mine_doctor_without_config(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "missing.toml"
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", tmp_path / "none.json")
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", tmp_path / "none.json")
 
-    with patch("openjarvis.cli.mine_cmd._provider_ids", return_value=()):
+    with patch("sunday.cli.mine_cmd._provider_ids", return_value=()):
         result = CliRunner().invoke(
             cli,
             ["mine", "doctor"],
-            env={"OPENJARVIS_CONFIG": str(config_path)},
+            env={"OPENSUNDAY_CONFIG": str(config_path)},
         )
 
     assert result.exit_code == 0
     assert "Pearl Mining Doctor" in result.output
-    assert "jarvis mine init" in result.output
+    assert "sunday mine init" in result.output
 
 
 def test_mine_status_no_session(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", tmp_path / "none.json")
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", tmp_path / "none.json")
 
     result = CliRunner().invoke(cli, ["mine", "status"])
 
@@ -320,16 +320,16 @@ def test_mine_validate_model_blocks_planned_without_allow(
             "gateway_metrics_url": "http://127.0.0.1:8339",
         },
     )
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._get_json",
+        "sunday.cli.mine_cmd._get_json",
         lambda url, *, timeout: {"data": [{"id": model}]},
     )
     stats = MagicMock()
     stats.shares_submitted = 1
     stats.shares_accepted = 1
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._stats_from_metrics_url",
+        "sunday.cli.mine_cmd._stats_from_metrics_url",
         lambda url, provider_id: (stats, None),
     )
 
@@ -354,20 +354,20 @@ def test_mine_validate_model_allows_planned_with_runtime_evidence(
             "gateway_metrics_url": "http://127.0.0.1:8339",
         },
     )
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._get_json",
+        "sunday.cli.mine_cmd._get_json",
         lambda url, *, timeout: {"data": [{"id": model}]},
     )
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._post_json",
+        "sunday.cli.mine_cmd._post_json",
         lambda url, payload, *, timeout: {"choices": [{"message": {"content": "ok"}}]},
     )
     stats = MagicMock()
     stats.shares_submitted = 2
     stats.shares_accepted = 1
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._stats_from_metrics_url",
+        "sunday.cli.mine_cmd._stats_from_metrics_url",
         lambda url, provider_id: (stats, None),
     )
 
@@ -401,16 +401,16 @@ def test_mine_validate_model_writes_json_artifact(tmp_path: Path, monkeypatch) -
             "gateway_metrics_url": "http://127.0.0.1:8339",
         },
     )
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._get_json",
+        "sunday.cli.mine_cmd._get_json",
         lambda url, *, timeout: {"data": [{"id": model}]},
     )
     stats = MagicMock()
     stats.shares_submitted = 2
     stats.shares_accepted = 1
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._stats_from_metrics_url",
+        "sunday.cli.mine_cmd._stats_from_metrics_url",
         lambda url, provider_id: (stats, None),
     )
 
@@ -453,9 +453,9 @@ def test_mine_validate_model_falls_back_to_vllm_metrics(
             "gateway_metrics_url": "http://127.0.0.1:8339",
         },
     )
-    monkeypatch.setattr("openjarvis.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
+    monkeypatch.setattr("sunday.cli.mine_cmd.SIDECAR_PATH", sidecar_path)
     monkeypatch.setattr(
-        "openjarvis.cli.mine_cmd._get_json",
+        "sunday.cli.mine_cmd._get_json",
         lambda url, *, timeout: {"data": [{"id": model}]},
     )
     stats = MagicMock()
@@ -467,7 +467,7 @@ def test_mine_validate_model_falls_back_to_vllm_metrics(
             return None, "connection refused"
         return stats, None
 
-    monkeypatch.setattr("openjarvis.cli.mine_cmd._stats_from_metrics_url", fake_stats)
+    monkeypatch.setattr("sunday.cli.mine_cmd._stats_from_metrics_url", fake_stats)
 
     result = CliRunner().invoke(cli, ["mine", "validate-model"])
 
