@@ -50,10 +50,10 @@ def main(
     """
     # Lazy import so that --help works without a running engine or heavy deps.
     try:
-        from openjarvis import Jarvis
+        from sunday import Jarvis
     except ImportError:
         click.echo(
-            "Error: openjarvis is not installed. "
+            "Error: sunday is not installed. "
             "Install it with:  uv sync --extra dev",
             err=True,
         )

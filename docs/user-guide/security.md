@@ -1,6 +1,6 @@
 # Security
 
-OpenJarvis includes a security layer that scans prompts and model outputs for secrets, personally identifiable information (PII), and sensitive file paths. The system is designed to be composable: scanners run as a pipeline, and the `GuardrailsEngine` wrapper drops in front of any inference backend without changing how the rest of your code works.
+SUNDAY includes a security layer that scans prompts and model outputs for secrets, personally identifiable information (PII), and sensitive file paths. The system is designed to be composable: scanners run as a pipeline, and the `GuardrailsEngine` wrapper drops in front of any inference backend without changing how the rest of your code works.
 
 ---
 
@@ -63,10 +63,10 @@ The security module has four independently usable components:
 === "Warn mode (default)"
 
     ```python title="warn_mode.py"
-    from openjarvis.engine.ollama import OllamaEngine
-    from openjarvis.security.guardrails import GuardrailsEngine
-    from openjarvis.security.types import RedactionMode
-    from openjarvis.core.types import Message, Role
+    from sunday.engine.ollama import OllamaEngine
+    from sunday.security.guardrails import GuardrailsEngine
+    from sunday.security.types import RedactionMode
+    from sunday.core.types import Message, Role
 
     engine = OllamaEngine()
     guarded = GuardrailsEngine(engine)  # (1)!
@@ -82,10 +82,10 @@ The security module has four independently usable components:
 === "Redact mode"
 
     ```python title="redact_mode.py"
-    from openjarvis.engine.ollama import OllamaEngine
-    from openjarvis.security.guardrails import GuardrailsEngine
-    from openjarvis.security.types import RedactionMode
-    from openjarvis.core.types import Message, Role
+    from sunday.engine.ollama import OllamaEngine
+    from sunday.security.guardrails import GuardrailsEngine
+    from sunday.security.types import RedactionMode
+    from sunday.core.types import Message, Role
 
     engine = OllamaEngine()
     guarded = GuardrailsEngine(engine, mode=RedactionMode.REDACT)  # (1)!
@@ -100,10 +100,10 @@ The security module has four independently usable components:
 === "Block mode"
 
     ```python title="block_mode.py"
-    from openjarvis.engine.ollama import OllamaEngine
-    from openjarvis.security.guardrails import GuardrailsEngine, SecurityBlockError
-    from openjarvis.security.types import RedactionMode
-    from openjarvis.core.types import Message, Role
+    from sunday.engine.ollama import OllamaEngine
+    from sunday.security.guardrails import GuardrailsEngine, SecurityBlockError
+    from sunday.security.types import RedactionMode
+    from sunday.core.types import Message, Role
 
     engine = OllamaEngine()
     guarded = GuardrailsEngine(engine, mode=RedactionMode.BLOCK)
@@ -143,9 +143,9 @@ You can subscribe to these events with an `AuditLogger` to build a persistent se
 You can pass any set of `BaseScanner` subclasses to restrict or extend scanning:
 
 ```python title="custom_scanners.py"
-from openjarvis.security.guardrails import GuardrailsEngine
-from openjarvis.security.scanner import SecretScanner
-from openjarvis.security.types import RedactionMode
+from sunday.security.guardrails import GuardrailsEngine
+from sunday.security.scanner import SecretScanner
+from sunday.security.types import RedactionMode
 
 # Only scan for secrets, skip PII
 guarded = GuardrailsEngine(
@@ -186,7 +186,7 @@ For streaming calls, `GuardrailsEngine.stream()` yields tokens in real time and 
 ### Direct Usage
 
 ```python title="secret_scanner.py"
-from openjarvis.security.scanner import SecretScanner
+from sunday.security.scanner import SecretScanner
 
 scanner = SecretScanner()
 
@@ -226,7 +226,7 @@ print(clean)  # Token: [REDACTED:openai_key]
 ### Direct Usage
 
 ```python title="pii_scanner.py"
-from openjarvis.security.scanner import PIIScanner
+from sunday.security.scanner import PIIScanner
 
 scanner = PIIScanner()
 
@@ -269,7 +269,7 @@ The `DEFAULT_SENSITIVE_PATTERNS` frozenset contains the following glob patterns:
 
 ```python title="file_policy.py"
 from pathlib import Path
-from openjarvis.security.file_policy import is_sensitive_file, filter_sensitive_paths
+from sunday.security.file_policy import is_sensitive_file, filter_sensitive_paths
 
 # Check a single file
 print(is_sensitive_file(".env"))           # True
@@ -300,16 +300,16 @@ The `AuditLogger` persists security events to an append-only SQLite database. It
 ### Event Bus Integration (Automatic)
 
 ```python title="audit_bus.py"
-from openjarvis.core.events import EventBus
-from openjarvis.security.audit import AuditLogger
-from openjarvis.security.guardrails import GuardrailsEngine
-from openjarvis.security.types import RedactionMode
-from openjarvis.engine.ollama import OllamaEngine
+from sunday.core.events import EventBus
+from sunday.security.audit import AuditLogger
+from sunday.security.guardrails import GuardrailsEngine
+from sunday.security.types import RedactionMode
+from sunday.engine.ollama import OllamaEngine
 
 bus = EventBus()
 
 # AuditLogger subscribes to SECURITY_SCAN, SECURITY_ALERT, SECURITY_BLOCK
-audit = AuditLogger(db_path="~/.openjarvis/audit.db", bus=bus)
+audit = AuditLogger(db_path="~/.sunday/audit.db", bus=bus)
 
 engine = OllamaEngine()
 guarded = GuardrailsEngine(
@@ -325,8 +325,8 @@ guarded = GuardrailsEngine(
 
 ```python title="audit_manual.py"
 import time
-from openjarvis.security.audit import AuditLogger
-from openjarvis.security.types import SecurityEvent, SecurityEventType
+from sunday.security.audit import AuditLogger
+from sunday.security.types import SecurityEvent, SecurityEventType
 
 audit = AuditLogger(db_path="./audit.db")
 
@@ -343,9 +343,9 @@ audit.log(event)
 ### Querying the Audit Log
 
 ```python title="audit_query.py"
-from openjarvis.security.audit import AuditLogger
+from sunday.security.audit import AuditLogger
 
-audit = AuditLogger(db_path="~/.openjarvis/audit.db")
+audit = AuditLogger(db_path="~/.sunday/audit.db")
 
 # Recent events
 events = audit.query(limit=20)
@@ -367,9 +367,9 @@ audit.close()
 
 ## Configuration
 
-Security settings live in the `[security]` section of `~/.openjarvis/config.toml`.
+Security settings live in the `[security]` section of `~/.sunday/config.toml`.
 
-```toml title="~/.openjarvis/config.toml"
+```toml title="~/.sunday/config.toml"
 [security]
 enabled = true
 scan_input = true
@@ -377,7 +377,7 @@ scan_output = true
 mode = "warn"               # "warn" | "redact" | "block"
 secret_scanner = true
 pii_scanner = true
-audit_log_path = "~/.openjarvis/audit.db"
+audit_log_path = "~/.sunday/audit.db"
 enforce_tool_confirmation = true
 ```
 
@@ -391,7 +391,7 @@ enforce_tool_confirmation = true
 | `mode` | `str` | `"warn"` | Action on findings: `warn`, `redact`, or `block` |
 | `secret_scanner` | `bool` | `true` | Run `SecretScanner` on all text |
 | `pii_scanner` | `bool` | `true` | Run `PIIScanner` on all text |
-| `audit_log_path` | `str` | `~/.openjarvis/audit.db` | Path to the SQLite audit log |
+| `audit_log_path` | `str` | `~/.sunday/audit.db` | Path to the SQLite audit log |
 | `enforce_tool_confirmation` | `bool` | `true` | Require explicit confirmation before tool execution |
 
 !!! tip "Start with warn, tighten later"
@@ -405,8 +405,8 @@ Implement `BaseScanner` and pass an instance to `GuardrailsEngine`:
 
 ```python title="custom_scanner.py"
 import re
-from openjarvis.security._stubs import BaseScanner
-from openjarvis.security.types import ScanFinding, ScanResult, ThreatLevel
+from sunday.security._stubs import BaseScanner
+from sunday.security.types import ScanFinding, ScanResult, ThreatLevel
 
 
 class InternalUrlScanner(BaseScanner):
@@ -434,8 +434,8 @@ class InternalUrlScanner(BaseScanner):
 
 
 # Use with GuardrailsEngine
-from openjarvis.security.guardrails import GuardrailsEngine
-from openjarvis.security.types import RedactionMode
+from sunday.security.guardrails import GuardrailsEngine
+from sunday.security.types import RedactionMode
 
 guarded = GuardrailsEngine(
     engine,
@@ -449,6 +449,6 @@ guarded = GuardrailsEngine(
 ## See Also
 
 - [Architecture: Security](../architecture/security.md) — pipeline design, event flow, and file policy integration
-- [API Reference: Security](../api-reference/openjarvis/security/index.md) — full class and function signatures
+- [API Reference: Security](../api-reference/sunday/security/index.md) — full class and function signatures
 - [Tools](tools.md) — how `FileReadTool` uses file policy
 - [Configuration](../getting-started/configuration.md) — full config reference

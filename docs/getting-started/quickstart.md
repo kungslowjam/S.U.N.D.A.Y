@@ -1,51 +1,51 @@
 ---
 title: Quick Start
-description: Get up and running with OpenJarvis in minutes
+description: Get up and running with SUNDAY in minutes
 search:
   boost: 3
 ---
 
 # Quick Start
 
-!!! tip "Running `jarvis` commands"
-    Every `jarvis ...` example below assumes you have either activated the project venv
+!!! tip "Running `sunday` commands"
+    Every `sunday ...` example below assumes you have either activated the project venv
     (`source .venv/bin/activate`) or are prefixing each command with `uv run`. A bare
-    `jarvis init --preset ...` from a fresh clone will fail with `command not found`.
+    `sunday init --preset ...` from a fresh clone will fail with `command not found`.
 
 ## What You Can Build
 
-OpenJarvis is a modular AI assistant framework. Here's what developers build with it:
+SUNDAY is a modular AI assistant framework. Here's what developers build with it:
 
 === "Chat with Any Model"
 
     ```bash
-    jarvis ask "Explain quantum entanglement" -m qwen3.5:4b   # use qwen3.5:9b or larger on GPU
+    sunday ask "Explain quantum entanglement" -m qwen3.5:4b   # use qwen3.5:9b or larger on GPU
     ```
 
 === "Agent + Tools"
 
     ```bash
-    jarvis ask --agent orchestrator --tools calculator,web_search "What is the GDP of France in USD?"
+    sunday ask --agent orchestrator --tools calculator,web_search "What is the GDP of France in USD?"
     ```
 
 === "Index Docs & Ask"
 
     ```bash
-    jarvis memory index ./docs/
-    jarvis ask "How do I configure the engine?"
+    sunday memory index ./docs/
+    sunday ask "How do I configure the engine?"
     ```
 
     !!! warning "Requires the Rust extension"
-        `jarvis memory index` and `jarvis memory search` import `openjarvis_rust`. If you
-        skipped the `uv run maturin develop -m rust/crates/openjarvis-python/Cargo.toml`
+        `sunday memory index` and `sunday memory search` import `sunday_rust`. If you
+        skipped the `uv run maturin develop -m rust/crates/sunday-python/Cargo.toml`
         step in [Installation](installation.md), these commands fail with
-        `ModuleNotFoundError: No module named 'openjarvis_rust'`. Build the extension
+        `ModuleNotFoundError: No module named 'sunday_rust'`. Build the extension
         once and any preset (including `deep-research`) will work.
 
 === "5-Line Python SDK"
 
     ```python
-    from openjarvis import Jarvis
+    from sunday import Jarvis
     with Jarvis() as j:
         print(j.ask("Hello!"))
     ```
@@ -53,43 +53,43 @@ OpenJarvis is a modular AI assistant framework. Here's what developers build wit
 === "API Server"
 
     ```bash
-    jarvis serve --port 8000
+    sunday serve --port 8000
     # Now use any OpenAI-compatible client
     ```
 
 === "Morning Digest"
 
     ```bash
-    cp configs/openjarvis/examples/morning-digest-mac.toml ~/.openjarvis/config.toml
-    jarvis connect gdrive       # one OAuth flow for Gmail, Calendar, Tasks
-    CARTESIA_API_KEY="..." jarvis digest --fresh
+    cp configs/sunday/examples/morning-digest-mac.toml ~/.sunday/config.toml
+    sunday connect gdrive       # one OAuth flow for Gmail, Calendar, Tasks
+    CARTESIA_API_KEY="..." sunday digest --fresh
     # Plays a spoken daily briefing with your email, calendar, health, and news
     ```
 
 === "Deep Research"
 
     ```bash
-    jarvis init --preset deep-research
-    jarvis memory index ~/Documents/papers/
-    jarvis ask "Summarize all documents about transformer architectures"
+    sunday init --preset deep-research
+    sunday memory index ~/Documents/papers/
+    sunday ask "Summarize all documents about transformer architectures"
     # Multi-hop search across your indexed docs with citations
     ```
 
 === "Code Assistant"
 
     ```bash
-    jarvis init --preset code-assistant
-    jarvis ask "Write a Python script that parses CSV files"
+    sunday init --preset code-assistant
+    sunday ask "Write a Python script that parses CSV files"
     # Orchestrator agent with code execution, file I/O, and shell access
     ```
 
 === "Scheduled Monitor"
 
     ```bash
-    jarvis init --preset scheduled-monitor
-    jarvis memory index ~/Documents/
-    jarvis scheduler start
-    jarvis scheduler create \
+    sunday init --preset scheduled-monitor
+    sunday memory index ~/Documents/
+    sunday scheduler start
+    sunday scheduler create \
       --prompt "Check for new emails about Project X" \
       --schedule "0 9 * * 1-5" --agent operative
     # Persistent agent that runs on a cron schedule
@@ -99,36 +99,36 @@ For complete copy-paste patterns, see [Code Snippets](snippets.md).
 
 ## Starter Configs
 
-Copy one of these to `~/.openjarvis/config.toml` to get a pre-configured setup:
+Copy one of these to `~/.sunday/config.toml` to get a pre-configured setup:
 
 | Config | For | What it does |
 |--------|-----|-------------|
-| [`chat-simple.toml`](https://github.com/open-jarvis/OpenJarvis/blob/main/configs/openjarvis/examples/chat-simple.toml) | Any machine | Lightweight chat, no tools -- simplest setup |
-| [`code-assistant.toml`](https://github.com/open-jarvis/OpenJarvis/blob/main/configs/openjarvis/examples/code-assistant.toml) | Any machine | Orchestrator agent with code execution, file I/O, shell |
-| [`deep-research.toml`](https://github.com/open-jarvis/OpenJarvis/blob/main/configs/openjarvis/examples/deep-research.toml) | Any machine | Multi-hop research across indexed documents with citations |
-| [`scheduled-monitor.toml`](https://github.com/open-jarvis/OpenJarvis/blob/main/configs/openjarvis/examples/scheduled-monitor.toml) | Any machine | Persistent operative agent on a cron schedule |
-| [`morning-digest-mac.toml`](https://github.com/open-jarvis/OpenJarvis/blob/main/configs/openjarvis/examples/morning-digest-mac.toml) | Mac (Apple Silicon) | Daily spoken briefing from email, calendar, health, news |
-| [`morning-digest-linux.toml`](https://github.com/open-jarvis/OpenJarvis/blob/main/configs/openjarvis/examples/morning-digest-linux.toml) | Linux / GPU server | Same, with vLLM support |
-| [`morning-digest-minimal.toml`](https://github.com/open-jarvis/OpenJarvis/blob/main/configs/openjarvis/examples/morning-digest-minimal.toml) | Any machine | Just Gmail + Calendar |
+| [`chat-simple.toml`](https://github.com/open-sunday/SUNDAY/blob/main/configs/sunday/examples/chat-simple.toml) | Any machine | Lightweight chat, no tools -- simplest setup |
+| [`code-assistant.toml`](https://github.com/open-sunday/SUNDAY/blob/main/configs/sunday/examples/code-assistant.toml) | Any machine | Orchestrator agent with code execution, file I/O, shell |
+| [`deep-research.toml`](https://github.com/open-sunday/SUNDAY/blob/main/configs/sunday/examples/deep-research.toml) | Any machine | Multi-hop research across indexed documents with citations |
+| [`scheduled-monitor.toml`](https://github.com/open-sunday/SUNDAY/blob/main/configs/sunday/examples/scheduled-monitor.toml) | Any machine | Persistent operative agent on a cron schedule |
+| [`morning-digest-mac.toml`](https://github.com/open-sunday/SUNDAY/blob/main/configs/sunday/examples/morning-digest-mac.toml) | Mac (Apple Silicon) | Daily spoken briefing from email, calendar, health, news |
+| [`morning-digest-linux.toml`](https://github.com/open-sunday/SUNDAY/blob/main/configs/sunday/examples/morning-digest-linux.toml) | Linux / GPU server | Same, with vLLM support |
+| [`morning-digest-minimal.toml`](https://github.com/open-sunday/SUNDAY/blob/main/configs/sunday/examples/morning-digest-minimal.toml) | Any machine | Just Gmail + Calendar |
 
 Or generate a config with digest included:
 
 ```bash
-jarvis init --digest
+sunday init --digest
 ```
 
-This guide walks through the core workflows of OpenJarvis: the browser app, CLI, Python SDK, agents with tools, memory, benchmarks, and the API server.
+This guide walks through the core workflows of SUNDAY: the browser app, CLI, Python SDK, agents with tools, memory, benchmarks, and the API server.
 
 !!! info "Prerequisites"
-    Make sure you have [installed OpenJarvis](installation.md) and have at least one inference backend running (e.g., `ollama serve`).
+    Make sure you have [installed SUNDAY](installation.md) and have at least one inference backend running (e.g., `ollama serve`).
 
 ## Browser App
 
-The quickest way to experience OpenJarvis is the full chat UI running in your browser:
+The quickest way to experience SUNDAY is the full chat UI running in your browser:
 
 ```bash
-git clone https://github.com/open-jarvis/OpenJarvis.git
-cd OpenJarvis
+git clone https://github.com/open-sunday/SUNDAY.git
+cd SUNDAY
 ./scripts/quickstart.sh
 ```
 
@@ -138,17 +138,17 @@ You get a ChatGPT-like interface with streaming responses, tool use, energy moni
 To stop all services, press ++ctrl+c++ in the terminal.
 
 !!! tip "Environment variable"
-    Set `OPENJARVIS_MODEL` to change the default model: `OPENJARVIS_MODEL=deepseek-r1:14b ./scripts/quickstart.sh`
+    Set `OPENSUNDAY_MODEL` to change the default model: `OPENSUNDAY_MODEL=deepseek-r1:14b ./scripts/quickstart.sh`
 
 ## Initialize Configuration
 
 Start by detecting your hardware and generating a configuration file:
 
 ```bash
-jarvis init
+sunday init
 ```
 
-This runs hardware auto-detection (GPU vendor, VRAM, CPU, RAM) and writes a config file to `~/.openjarvis/config.toml` with sensible defaults for your system. It also selects the recommended inference engine.
+This runs hardware auto-detection (GPU vendor, VRAM, CPU, RAM) and writes a config file to `~/.sunday/config.toml` with sensible defaults for your system. It also selects the recommended inference engine.
 
 ```
 Detecting hardware...
@@ -163,7 +163,7 @@ Config written successfully.
 To overwrite an existing config:
 
 ```bash
-jarvis init --force
+sunday init --force
 ```
 
 See [Configuration](configuration.md) for the full config reference.
@@ -172,35 +172,35 @@ See [Configuration](configuration.md) for the full config reference.
 
 ### Via CLI
 
-The simplest way to interact with OpenJarvis is the `ask` command:
+The simplest way to interact with SUNDAY is the `ask` command:
 
 ```bash
-jarvis ask "What is the capital of France?"
+sunday ask "What is the capital of France?"
 ```
 
-OpenJarvis will auto-detect a running engine, select a model using the configured router policy, and return the response.
+SUNDAY will auto-detect a running engine, select a model using the configured router policy, and return the response.
 
 #### CLI Options
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `-m`, `--model` | Override model selection | `jarvis ask -m qwen3:8b "Hello"` |
-| `-e`, `--engine` | Force a specific engine | `jarvis ask -e ollama "Hello"` |
-| `-t`, `--temperature` | Sampling temperature (default: 0.7) | `jarvis ask -t 0.2 "Hello"` |
-| `--max-tokens` | Max tokens to generate (default: 1024) | `jarvis ask --max-tokens 2048 "Hello"` |
-| `--json` | Output raw JSON result | `jarvis ask --json "Hello"` |
-| `--no-stream` | Disable streaming | `jarvis ask --no-stream "Hello"` |
-| `--no-context` | Disable memory context injection | `jarvis ask --no-context "Hello"` |
-| `-a`, `--agent` | Use an agent | `jarvis ask -a orchestrator "Hello"` |
-| `--tools` | Comma-separated tools | `jarvis ask --tools calculator,think "2+2"` |
-| `--router` | Router policy for model selection | `jarvis ask --router heuristic "Hello"` |
+| `-m`, `--model` | Override model selection | `sunday ask -m qwen3:8b "Hello"` |
+| `-e`, `--engine` | Force a specific engine | `sunday ask -e ollama "Hello"` |
+| `-t`, `--temperature` | Sampling temperature (default: 0.7) | `sunday ask -t 0.2 "Hello"` |
+| `--max-tokens` | Max tokens to generate (default: 1024) | `sunday ask --max-tokens 2048 "Hello"` |
+| `--json` | Output raw JSON result | `sunday ask --json "Hello"` |
+| `--no-stream` | Disable streaming | `sunday ask --no-stream "Hello"` |
+| `--no-context` | Disable memory context injection | `sunday ask --no-context "Hello"` |
+| `-a`, `--agent` | Use an agent | `sunday ask -a orchestrator "Hello"` |
+| `--tools` | Comma-separated tools | `sunday ask --tools calculator,think "2+2"` |
+| `--router` | Router policy for model selection | `sunday ask --router heuristic "Hello"` |
 
 ### Via Python SDK
 
 The `Jarvis` class provides a high-level Python interface:
 
 ```python
-from openjarvis import Jarvis
+from sunday import Jarvis
 
 j = Jarvis()
 response = j.ask("What is the capital of France?")
@@ -221,7 +221,7 @@ print(result["usage"])    # Token usage statistics
 #### SDK Constructor Options
 
 ```python
-# Use default config (auto-detected hardware, ~/.openjarvis/config.toml)
+# Use default config (auto-detected hardware, ~/.sunday/config.toml)
 j = Jarvis()
 
 # Override the model
@@ -264,13 +264,13 @@ Agents add multi-turn reasoning and tool-calling capabilities. The `orchestrator
 ### CLI Example
 
 ```bash
-jarvis ask --agent orchestrator --tools calculator,think "What is 137 * 42?"
+sunday ask --agent orchestrator --tools calculator,think "What is 137 * 42?"
 ```
 
 ### SDK Example
 
 ```python
-from openjarvis import Jarvis
+from sunday import Jarvis
 
 j = Jarvis()
 result = j.ask_full(
@@ -290,22 +290,22 @@ The memory system lets you index documents and inject relevant context into quer
 
 ### Index Documents
 
-Index a file or directory. OpenJarvis chunks the content and stores it in the configured memory backend (SQLite/FTS5 by default).
+Index a file or directory. SUNDAY chunks the content and stores it in the configured memory backend (SQLite/FTS5 by default).
 
 === "CLI"
 
     ```bash
     # Index a directory
-    jarvis memory index ./docs/
+    sunday memory index ./docs/
 
     # Index a single file with custom chunk size
-    jarvis memory index ./paper.txt --chunk-size 256 --chunk-overlap 32
+    sunday memory index ./paper.txt --chunk-size 256 --chunk-overlap 32
     ```
 
 === "Python SDK"
 
     ```python
-    from openjarvis import Jarvis
+    from sunday import Jarvis
 
     j = Jarvis()
     result = j.memory.index("./docs/", chunk_size=512, chunk_overlap=64)
@@ -320,8 +320,8 @@ Query the memory store to find relevant chunks:
 === "CLI"
 
     ```bash
-    jarvis memory search "configuration options"
-    jarvis memory search -k 10 "how to deploy"
+    sunday memory search "configuration options"
+    sunday memory search -k 10 "how to deploy"
     ```
 
 === "Python SDK"
@@ -337,7 +337,7 @@ Query the memory store to find relevant chunks:
 === "CLI"
 
     ```bash
-    jarvis memory stats
+    sunday memory stats
     ```
 
 === "Python SDK"
@@ -349,14 +349,14 @@ Query the memory store to find relevant chunks:
 
 ### Automatic Context Injection
 
-When you have indexed documents, OpenJarvis automatically injects relevant context into your queries. The memory system searches for chunks matching your query and prepends them as system context before sending to the model.
+When you have indexed documents, SUNDAY automatically injects relevant context into your queries. The memory system searches for chunks matching your query and prepends them as system context before sending to the model.
 
 To disable this behavior:
 
 === "CLI"
 
     ```bash
-    jarvis ask --no-context "Hello"
+    sunday ask --no-context "Hello"
     ```
 
 === "Python SDK"
@@ -374,7 +374,7 @@ Context injection is controlled by `agent.context_from_memory` in `config.toml`.
 See all models available on running engines:
 
 ```bash
-jarvis model list
+sunday model list
 ```
 
 This produces a table showing each model, its engine, parameter count, context length, and VRAM requirements.
@@ -382,19 +382,19 @@ This produces a table showing each model, its engine, parameter count, context l
 ### Get Model Details
 
 ```bash
-jarvis model info qwen3:8b
+sunday model info qwen3:8b
 ```
 
 ### Pull a Model (Ollama)
 
 ```bash
-jarvis model pull qwen3:8b
+sunday model pull qwen3:8b
 ```
 
 ### SDK Model Listing
 
 ```python
-from openjarvis import Jarvis
+from sunday import Jarvis
 
 j = Jarvis()
 models = j.list_models()
@@ -411,24 +411,24 @@ The benchmarking framework measures inference latency and throughput against you
 === "All benchmarks"
 
     ```bash
-    jarvis bench run
+    sunday bench run
     ```
 
 === "Specific benchmark"
 
     ```bash
-    jarvis bench run -b latency
-    jarvis bench run -b throughput
+    sunday bench run -b latency
+    sunday bench run -b throughput
     ```
 
 === "Custom options"
 
     ```bash
     # 20 samples, JSON output
-    jarvis bench run -n 20 --json
+    sunday bench run -n 20 --json
 
     # Specific model and engine, write to file
-    jarvis bench run -m qwen3:8b -e ollama -o results.jsonl
+    sunday bench run -m qwen3:8b -e ollama -o results.jsonl
     ```
 
 Example output:
@@ -451,7 +451,7 @@ throughput (10 samples, 0 errors)
 
 ## Starting the API Server
 
-OpenJarvis provides an OpenAI-compatible API server for integration with existing tools and frontends.
+SUNDAY provides an OpenAI-compatible API server for integration with existing tools and frontends.
 
 !!! note "Requires the `server` extra"
     ```bash
@@ -461,13 +461,13 @@ OpenJarvis provides an OpenAI-compatible API server for integration with existin
 ### Start the Server
 
 ```bash
-jarvis serve --port 8000
+sunday serve --port 8000
 ```
 
 With custom options:
 
 ```bash
-jarvis serve --host 0.0.0.0 --port 8000 --engine ollama --model qwen3:8b --agent orchestrator
+sunday serve --host 0.0.0.0 --port 8000 --engine ollama --model qwen3:8b --agent orchestrator
 ```
 
 ### API Endpoints
@@ -506,23 +506,23 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## Telemetry
 
-OpenJarvis records telemetry for every inference call (timing, tokens, cost). View aggregated statistics:
+SUNDAY records telemetry for every inference call (timing, tokens, cost). View aggregated statistics:
 
 ```bash
-jarvis telemetry stats
+sunday telemetry stats
 ```
 
 Export telemetry data:
 
 ```bash
-jarvis telemetry export --format json
-jarvis telemetry export --format csv -o telemetry.csv
+sunday telemetry export --format json
+sunday telemetry export --format csv -o telemetry.csv
 ```
 
 Clear all telemetry records:
 
 ```bash
-jarvis telemetry clear --yes
+sunday telemetry clear --yes
 ```
 
 ## Complete Working Example
@@ -530,7 +530,7 @@ jarvis telemetry clear --yes
 Here is a complete end-to-end session combining multiple features:
 
 ```python
-from openjarvis import Jarvis
+from sunday import Jarvis
 
 # Initialize with defaults (auto-detect hardware and engine)
 j = Jarvis()

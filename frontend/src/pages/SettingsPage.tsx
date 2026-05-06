@@ -16,26 +16,38 @@ import {
   Key,
   Search,
   Brain,
+  Package,
+  Plus,
+  RefreshCw,
+  X,
+  Sparkles,
 } from 'lucide-react';
 import { useAppStore, type ThemeMode } from '../lib/store';
-import { checkHealth, fetchSpeechHealth, getMemoryStats } from '../lib/api';
+import { checkHealth, fetchSpeechHealth, getMemoryStats, fetchInstalledSkills, fetchSkillSources, fetchAvailableSkills, installSkill, removeSkill, syncSkills, type InstalledSkill, type SkillSource, type AvailableSkill } from '../lib/api';
 
-function OllamaModelList() {
-  const [models, setModels] = useState<Array<{ name: string; size: number }>>([]);
+function ModelList() {
+  const [models, setModels] = useState<string[]>([]);
+  const settings = useAppStore(s => s.settings);
+
   useEffect(() => {
-    fetch('http://localhost:11434/api/tags')
+    fetch(`${settings.apiUrl || 'http://localhost:8000'}/v1/models`)
       .then(r => r.json())
-      .then(data => setModels((data.models || []).map((m: any) => ({ name: m.name, size: m.size }))))
+      .then(data => {
+        if (data && data.data) {
+          setModels(data.data.map((m: any) => m.id));
+        }
+      })
       .catch(() => setModels([]));
-  }, []);
-  if (models.length === 0) return <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No models loaded</span>;
+  }, [settings.apiUrl]);
+
+  if (models.length === 0) return <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No models found</span>;
   return (
     <div className="flex flex-wrap gap-1">
-      {models.map(m => (
-        <span key={m.name} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
+      {models.map(name => (
+        <span key={name} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
           style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text)' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-success)', display: 'inline-block' }} />
-          {m.name} ({(m.size / 1e9).toFixed(1)} GB)
+          {name}
         </span>
       ))}
     </div>
@@ -124,19 +136,19 @@ export function SettingsPage() {
 
   const [memoryStats, setMemoryStats] = useState<{ entries: number; backend: string } | null>(null);
   const [memoryEnabled, setMemoryEnabled] = useState(() => {
-    try { return localStorage.getItem('openjarvis-memory-enabled') !== 'false'; } catch { return true; }
+    try { return localStorage.getItem('sunday-memory-enabled') !== 'false'; } catch { return true; }
   });
   const [memoryBackend, setMemoryBackend] = useState(() => {
-    try { return localStorage.getItem('openjarvis-memory-backend') || 'sqlite'; } catch { return 'sqlite'; }
+    try { return localStorage.getItem('sunday-memory-backend') || 'sqlite'; } catch { return 'sqlite'; }
   });
   const [memoryTopK, setMemoryTopK] = useState(() => {
-    try { return parseInt(localStorage.getItem('openjarvis-memory-top-k') || '5'); } catch { return 5; }
+    try { return parseInt(localStorage.getItem('sunday-memory-top-k') || '5'); } catch { return 5; }
   });
   const [memoryMinScore, setMemoryMinScore] = useState(() => {
-    try { return parseFloat(localStorage.getItem('openjarvis-memory-min-score') || '0.1'); } catch { return 0.1; }
+    try { return parseFloat(localStorage.getItem('sunday-memory-min-score') || '0.1'); } catch { return 0.1; }
   });
   const [memoryMaxTokens, setMemoryMaxTokens] = useState(() => {
-    try { return parseInt(localStorage.getItem('openjarvis-memory-max-tokens') || '2048'); } catch { return 2048; }
+    try { return parseInt(localStorage.getItem('sunday-memory-max-tokens') || '2048'); } catch { return 2048; }
   });
 
   useEffect(() => {
@@ -155,12 +167,12 @@ export function SettingsPage() {
   };
 
   const handleExport = () => {
-    const data = localStorage.getItem('openjarvis-conversations') || '{}';
+    const data = localStorage.getItem('sunday-conversations') || '{}';
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `openjarvis-export-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `sunday-export-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -177,7 +189,7 @@ export function SettingsPage() {
         try {
           const data = JSON.parse(ev.target?.result as string);
           if (data.version === 1) {
-            localStorage.setItem('openjarvis-conversations', JSON.stringify(data));
+            localStorage.setItem('sunday-conversations', JSON.stringify(data));
             useAppStore.getState().loadConversations();
             showSaved();
           }
@@ -195,7 +207,7 @@ export function SettingsPage() {
       setTimeout(() => setConfirmClear(false), 3000);
       return;
     }
-    localStorage.removeItem('openjarvis-conversations');
+    localStorage.removeItem('sunday-conversations');
     useAppStore.getState().loadConversations();
     setConfirmClear(false);
     showSaved();
@@ -226,7 +238,7 @@ export function SettingsPage() {
         <div className="flex flex-col gap-4">
           {/* Appearance */}
           <Section title="Appearance">
-            <SettingRow label="Theme" description="Choose how OpenJarvis looks">
+            <SettingRow label="Theme" description="Choose how SUNDAY looks">
               <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-bg-secondary)' }}>
                 {themeOptions.map((opt) => {
                   const isActive = settings.theme === opt.value;
@@ -297,18 +309,18 @@ export function SettingsPage() {
 
           {/* Models */}
           <Section title="Models">
-            <SettingRow label="Local models (Ollama)" description="Models available for local inference">
-              <OllamaModelList />
+            <SettingRow label="Available models" description="Models discovered from local directory and Ollama">
+              <ModelList />
             </SettingRow>
             <div className="text-xs mt-2 px-1" style={{ color: 'var(--color-text-tertiary)' }}>
               Run <code className="px-1 py-0.5 rounded text-[11px]" style={{ background: 'var(--color-bg-tertiary)' }}>ollama pull &lt;model-name&gt;</code> in your terminal to add more models
             </div>
             <SettingRow label="Cloud providers" description="Green dot means API key is configured">
               <div className="flex flex-wrap gap-3">
-                <CloudProviderStatus label="OpenAI" storageKey="openjarvis-openai-key" />
-                <CloudProviderStatus label="Anthropic" storageKey="openjarvis-anthropic-key" />
-                <CloudProviderStatus label="Google" storageKey="openjarvis-gemini-key" />
-                <CloudProviderStatus label="OpenRouter" storageKey="openjarvis-openrouter-key" />
+                <CloudProviderStatus label="OpenAI" storageKey="sunday-openai-key" />
+                <CloudProviderStatus label="Anthropic" storageKey="sunday-anthropic-key" />
+                <CloudProviderStatus label="Google" storageKey="sunday-gemini-key" />
+                <CloudProviderStatus label="OpenRouter" storageKey="sunday-openrouter-key" />
               </div>
             </SettingRow>
           </Section>
@@ -316,23 +328,23 @@ export function SettingsPage() {
           {/* API Keys */}
           <Section title="API Keys">
             <SettingRow label="OpenAI" description="GPT-4, GPT-3.5, etc.">
-              <ApiKeyInput storageKey="openjarvis-openai-key" placeholder="sk-..." />
+              <ApiKeyInput storageKey="sunday-openai-key" placeholder="sk-..." />
             </SettingRow>
             <SettingRow label="Anthropic" description="Claude models">
-              <ApiKeyInput storageKey="openjarvis-anthropic-key" placeholder="sk-ant-..." />
+              <ApiKeyInput storageKey="sunday-anthropic-key" placeholder="sk-ant-..." />
             </SettingRow>
             <SettingRow label="Google" description="Gemini models">
-              <ApiKeyInput storageKey="openjarvis-gemini-key" placeholder="AI..." />
+              <ApiKeyInput storageKey="sunday-gemini-key" placeholder="AI..." />
             </SettingRow>
             <SettingRow label="OpenRouter" description="Multi-provider routing">
-              <ApiKeyInput storageKey="openjarvis-openrouter-key" placeholder="sk-or-..." />
+              <ApiKeyInput storageKey="sunday-openrouter-key" placeholder="sk-or-..." />
             </SettingRow>
           </Section>
 
           {/* Tools */}
           <Section title="Tools">
             <SettingRow label="Web Search" description="SerpAPI or Tavily key for web search tool">
-              <ApiKeyInput storageKey="openjarvis-search-key" placeholder="API key..." />
+              <ApiKeyInput storageKey="sunday-search-key" placeholder="API key..." />
             </SettingRow>
           </Section>
 
@@ -351,7 +363,7 @@ export function SettingsPage() {
                 onClick={() => {
                   const next = !memoryEnabled;
                   setMemoryEnabled(next);
-                  try { localStorage.setItem('openjarvis-memory-enabled', String(next)); } catch {}
+                  try { localStorage.setItem('sunday-memory-enabled', String(next)); } catch {}
                   showSaved();
                 }}
                 className="relative w-11 h-6 rounded-full transition-colors cursor-pointer"
@@ -373,7 +385,7 @@ export function SettingsPage() {
                 value={memoryBackend}
                 onChange={(e) => {
                   setMemoryBackend(e.target.value);
-                  try { localStorage.setItem('openjarvis-memory-backend', e.target.value); } catch {}
+                  try { localStorage.setItem('sunday-memory-backend', e.target.value); } catch {}
                   showSaved();
                 }}
                 className="text-sm px-3 py-1.5 rounded-lg outline-none cursor-pointer"
@@ -400,7 +412,7 @@ export function SettingsPage() {
                 onChange={(e) => {
                   const v = parseInt(e.target.value);
                   setMemoryTopK(v);
-                  try { localStorage.setItem('openjarvis-memory-top-k', String(v)); } catch {}
+                  try { localStorage.setItem('sunday-memory-top-k', String(v)); } catch {}
                   showSaved();
                 }}
                 className="w-32 cursor-pointer accent-[var(--color-accent)]"
@@ -416,7 +428,7 @@ export function SettingsPage() {
                 onChange={(e) => {
                   const v = parseFloat(e.target.value);
                   setMemoryMinScore(v);
-                  try { localStorage.setItem('openjarvis-memory-min-score', String(v)); } catch {}
+                  try { localStorage.setItem('sunday-memory-min-score', String(v)); } catch {}
                   showSaved();
                 }}
                 className="w-32 cursor-pointer accent-[var(--color-accent)]"
@@ -432,13 +444,16 @@ export function SettingsPage() {
                 onChange={(e) => {
                   const v = parseInt(e.target.value);
                   setMemoryMaxTokens(v);
-                  try { localStorage.setItem('openjarvis-memory-max-tokens', String(v)); } catch {}
+                  try { localStorage.setItem('sunday-memory-max-tokens', String(v)); } catch {}
                   showSaved();
                 }}
                 className="w-32 cursor-pointer accent-[var(--color-accent)]"
               />
             </SettingRow>
           </Section>
+
+          {/* Skills */}
+          <SkillsSection />
 
           {/* Model defaults */}
           <Section title="Model Defaults">
@@ -505,7 +520,7 @@ export function SettingsPage() {
             {!speechBackendAvailable && speechBackendAvailable !== null && (
               <div className="text-xs mt-2 px-1" style={{ color: 'var(--color-text-tertiary)' }}>
                 Set up a speech backend to use voice input.
-                See the <a href="https://open-jarvis.github.io/OpenJarvis/user-guide/tools/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>documentation</a> for details.
+                See the <a href="https://open-sunday.github.io/SUNDAY/user-guide/tools/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>documentation</a> for details.
               </div>
             )}
           </Section>
@@ -555,14 +570,14 @@ export function SettingsPage() {
           <Section title="About">
             <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <p className="mb-2">
-                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>OpenJarvis</span> — Programming abstractions for on-device AI.
+                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>SUNDAY</span> — Programming abstractions for on-device AI.
               </p>
               <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
                 Part of Intelligence Per Watt, a research initiative at Stanford SAIL.
               </p>
               <div className="flex gap-3 mt-3 text-xs">
                 <a
-                  href="https://scalingintelligence.stanford.edu/blogs/openjarvis/"
+                  href="https://scalingintelligence.stanford.edu/blogs/sunday/"
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--color-accent)' }}
@@ -570,7 +585,7 @@ export function SettingsPage() {
                   Project site
                 </a>
                 <a
-                  href="https://open-jarvis.github.io/OpenJarvis/"
+                  href="https://open-sunday.github.io/SUNDAY/"
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: 'var(--color-accent)' }}
@@ -580,8 +595,205 @@ export function SettingsPage() {
               </div>
             </div>
           </Section>
+
+          <SkillsSection />
         </div>
       </div>
     </div>
+  );
+}
+
+function SkillsSection() {
+  const [installed, setInstalled] = useState<InstalledSkill[]>([]);
+  const [sources, setSources] = useState<SkillSource[]>([]);
+  const [available, setAvailable] = useState<AvailableSkill[]>([]);
+  const [showInstall, setShowInstall] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState('');
+
+  const loadInstalled = async () => {
+    try {
+      const skills = await fetchInstalledSkills();
+      setInstalled(skills);
+    } catch {}
+  };
+
+  const loadSources = async () => {
+    try {
+      const srcs = await fetchSkillSources();
+      setSources(srcs);
+      if (srcs.length > 0 && !selectedSource) {
+        setSelectedSource(srcs[0].source);
+      }
+    } catch {}
+  };
+
+  const loadAvailable = async () => {
+    if (!selectedSource && !searchQuery) return;
+    setLoading(true);
+    try {
+      const skills = await fetchAvailableSkills(selectedSource || undefined, searchQuery || undefined);
+      setAvailable(skills);
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadInstalled();
+    loadSources();
+  }, []);
+
+  useEffect(() => {
+    if (showInstall) {
+      loadAvailable();
+    }
+  }, [showInstall, selectedSource, searchQuery]);
+
+  const handleInstall = async (skill: AvailableSkill) => {
+    setInstalling(skill.name);
+    try {
+      await installSkill(skill.source, skill.name);
+      await loadInstalled();
+      setAvailable(available.filter(s => s.name !== skill.name));
+    } catch (e: any) {
+      alert(`Failed to install: ${e.message}`);
+    }
+    setInstalling(null);
+  };
+
+  const handleRemove = async (name: string) => {
+    if (!confirm(`Remove skill "${name}"?`)) return;
+    try {
+      await removeSkill(name);
+      await loadInstalled();
+    } catch (e: any) {
+      alert(`Failed to remove: ${e.message}`);
+    }
+  };
+
+  const handleSync = async () => {
+    setLoading(true);
+    try {
+      await syncSkills(selectedSource);
+      await loadInstalled();
+    } catch (e: any) {
+      alert(`Sync failed: ${e.message}`);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <Section title="Skills">
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm" style={{ color: 'var(--color-text)' }}>Installed skills</span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setShowInstall(!showInstall)}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer"
+              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
+            >
+              <Plus size={12} /> Install
+            </button>
+            <button
+              onClick={handleSync}
+              disabled={loading}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer"
+              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
+            >
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Sync
+            </button>
+          </div>
+        </div>
+        {installed.length === 0 ? (
+          <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No skills installed</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {installed.map(skill => (
+              <span
+                key={skill.name}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs"
+                style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text)' }}
+              >
+                <Sparkles size={10} style={{ color: 'var(--color-accent)' }} />
+                {skill.name}
+                <button
+                  onClick={() => handleRemove(skill.name)}
+                  className="ml-1 p-0.5 rounded hover:bg-red-500/20 cursor-pointer"
+                  style={{ color: 'var(--color-text-tertiary)' }}
+                >
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showInstall && (
+        <div className="border-t pt-4 mt-2" style={{ borderColor: 'var(--color-border-subtle)' }}>
+          <div className="text-sm font-medium mb-3" style={{ color: 'var(--color-text)' }}>Install from source</div>
+          <div className="flex gap-2 mb-3">
+            <select
+              value={selectedSource}
+              onChange={e => setSelectedSource(e.target.value)}
+              className="text-sm px-2 py-1.5 rounded-lg outline-none cursor-pointer"
+              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
+            >
+              <option value="">All sources</option>
+              {sources.map(s => (
+                <option key={s.source} value={s.source}>{s.source}</option>
+              ))}
+            </select>
+            <div className="flex-1 relative">
+              <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search skills..."
+                className="w-full pl-7 pr-3 py-1.5 rounded-lg text-sm outline-none"
+                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
+              />
+            </div>
+          </div>
+          {loading ? (
+            <div className="text-xs py-2" style={{ color: 'var(--color-text-tertiary)' }}>Loading...</div>
+          ) : available.length === 0 ? (
+            <div className="text-xs py-2" style={{ color: 'var(--color-text-tertiary)' }}>
+              {searchQuery ? 'No skills found' : 'Configure skill sources in config.toml to browse'}
+            </div>
+          ) : (
+            <div className="max-h-48 overflow-y-auto space-y-2">
+              {available.map(skill => (
+                <div
+                  key={`${skill.source}:${skill.name}`}
+                  className="flex items-center justify-between p-2 rounded"
+                  style={{ background: 'var(--color-bg-secondary)' }}
+                >
+                  <div>
+                    <div className="text-sm" style={{ color: 'var(--color-text)' }}>{skill.name}</div>
+                    <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                      {skill.source} / {skill.category}
+                      {skill.description && ` — ${skill.description.slice(0, 60)}`}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleInstall(skill)}
+                    disabled={installing === skill.name}
+                    className="flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer"
+                    style={{ background: 'var(--color-accent)', color: 'white' }}
+                  >
+                    {installing === skill.name ? '...' : <><Plus size={10} /> Install</>}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Section>
   );
 }

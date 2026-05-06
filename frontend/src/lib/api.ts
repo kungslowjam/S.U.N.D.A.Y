@@ -17,7 +17,7 @@ export const isTauri = () => typeof window !== 'undefined' && !!window.__TAURI_I
 
 // Cached API base URL fetched from the Tauri backend at startup.
 // This avoids hardcoding the port — the Rust backend is the single
-// source of truth for JARVIS_PORT.
+// source of truth for SUNDAY_PORT.
 let _tauriApiBase: string | null = null;
 
 /** Pre-fetch the API base URL from the Tauri backend (call once at init). */
@@ -35,7 +35,7 @@ const DESKTOP_API_FALLBACK = 'http://127.0.0.1:8000';
 
 const getSettingsApiUrl = (): string => {
   try {
-    const raw = localStorage.getItem('openjarvis-settings');
+    const raw = localStorage.getItem('sunday-settings');
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed.apiUrl) return parsed.apiUrl.replace(/\/+$/, '');
@@ -273,16 +273,32 @@ export async function transcribeAudio(audioBlob: Blob, filename = 'recording.web
 }
 
 export async function fetchSpeechHealth(): Promise<SpeechHealth> {
+  const browserSpeechAvailable = (): boolean => {
+    if (typeof window === 'undefined') return false;
+    const w = window as any;
+    return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
+  };
+
   if (isTauri()) {
     try {
       return await tauriInvoke<SpeechHealth>('speech_health');
     } catch {
-      return { available: false };
+      return browserSpeechAvailable()
+        ? { available: true, backend: 'browser', reason: 'Using browser speech recognition.' }
+        : { available: false };
     }
   }
   const res = await fetch(`${getBase()}/v1/speech/health`);
-  if (!res.ok) return { available: false };
-  return res.json();
+  if (!res.ok) {
+    return browserSpeechAvailable()
+      ? { available: true, backend: 'browser', reason: 'Using browser speech recognition.' }
+      : { available: false };
+  }
+  const health = await res.json();
+  if (!health.available && browserSpeechAvailable()) {
+    return { available: true, backend: 'browser', reason: 'Using browser speech recognition.' };
+  }
+  return health;
 }
 
 // ---------------------------------------------------------------------------
@@ -915,5 +931,111 @@ export async function indexMemoryPath(path: string): Promise<{ chunks_indexed: n
 export async function getMemoryConfig(): Promise<MemoryConfig> {
   const res = await fetch(`${getBase()}/v1/memory/config`);
   if (!res.ok) throw new Error('Failed to fetch memory config');
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Skills
+// ---------------------------------------------------------------------------
+
+export interface InstalledSkill {
+  name: string;
+  version?: string;
+  description?: string;
+  author?: string;
+  tags?: string[];
+  category?: string;
+}
+
+export interface AvailableSkill {
+  name: string;
+  source: string;
+  category: string;
+  description: string;
+}
+
+export interface SkillSource {
+  source: string;
+  url?: string;
+  filter?: Record<string, unknown>;
+  auto_update: boolean;
+}
+
+export async function fetchInstalledSkills(): Promise<InstalledSkill[]> {
+  const res = await fetch(`${getBase()}/v1/skills`);
+  if (!res.ok) throw new Error('Failed to fetch skills');
+  const data = await res.json();
+  return data.skills || [];
+}
+
+export async function fetchSkillSources(): Promise<SkillSource[]> {
+  const res = await fetch(`${getBase()}/v1/skills/sources`);
+  if (!res.ok) throw new Error('Failed to fetch sources');
+  const data = await res.json();
+  return data.sources || [];
+}
+
+export async function fetchAvailableSkills(source?: string, search?: string, category?: string): Promise<AvailableSkill[]> {
+  const params = new URLSearchParams();
+  if (source) params.set('source', source);
+  if (search) params.set('search', search);
+  if (category) params.set('category', category);
+  const res = await fetch(`${getBase()}/v1/skills/available?${params}`);
+  if (!res.ok) throw new Error('Failed to fetch available skills');
+  const data = await res.json();
+  return data.skills || [];
+}
+
+export interface InstallSkillResult {
+  success: boolean;
+  skipped: boolean;
+  target_path: string;
+  translated_tools: string[];
+  warnings: string[];
+}
+
+export async function installSkill(
+  source: string,
+  name: string,
+  url?: string,
+  withScripts = false,
+  force = false,
+): Promise<InstallSkillResult> {
+  const res = await fetch(`${getBase()}/v1/skills/install`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, name, url, with_scripts: withScripts, force }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to install' }));
+    throw new Error(err.detail || `Failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function removeSkill(name: string): Promise<{ removed: string[] }> {
+  const res = await fetch(`${getBase()}/v1/skills/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Failed to remove' }));
+    throw new Error(err.detail || `Failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function syncSkills(
+  source = '',
+  withScripts = false,
+  force = false,
+): Promise<{ installed: number; skipped: number }> {
+  const params = new URLSearchParams();
+  if (source) params.set('source', source);
+  const res = await fetch(`${getBase()}/v1/skills/sync?${params}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ with_scripts: withScripts, force }),
+  });
+  if (!res.ok) throw new Error('Failed to sync skills');
   return res.json();
 }

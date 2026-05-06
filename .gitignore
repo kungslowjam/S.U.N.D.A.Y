@@ -61,6 +61,7 @@ site/
 frontend/node_modules/
 frontend/dist/
 src/openjarvis/server/static/
+src/sunday/server/static/
 
 # Desktop (Tauri)
 frontend/src-tauri/target/
@@ -98,6 +99,16 @@ src/openjarvis/channels/whatsapp_baileys_bridge/node_modules/
 # Second Repos
 Inline/
 scratch/
+
+# Local model/runtime artifacts
+llama-cpp/
+*.gguf
+*.exe
+*.dll
+omni-lab/llama.cpp-omni/
+omni-lab/models/
+omni-lab/output/
+omni-lab/build-logs/
 
 # ---------------------------------------------------------------------------
 # Distillation runtime artifacts (defense in depth — these should always live

@@ -1,14 +1,14 @@
-# OpenJarvis configuration — GLM-4.7-Flash eval on 8x A100-80GB
+# SUNDAY configuration — GLM-4.7-Flash eval on 8x A100-80GB
 
 # ═══════════════════════════════════════════════════════════════
 # PILLAR 1: Intelligence — The Model
 # ═══════════════════════════════════════════════════════════════
 [intelligence]
-default_model = "zai-org/GLM-4.7-Flash"   # HuggingFace model ID
-fallback_model = "glm-4.7-flash"          # Catalog alias fallback
-preferred_engine = "vllm"                 # MoE model, vLLM is best for A100s
-provider = "local"                        # Running locally on this machine
-quantization = "none"                     # Full precision, we have 640GB VRAM
+default_model = "MiniCPM-o-4_5-Q4_K_M.gguf"
+fallback_model = "MiniCPM-o-4_5-Q4_K_M.gguf"
+preferred_engine = "llamacpp"
+provider = "local"
+quantization = "q4_k_m"
 # Generation defaults for eval
 temperature = 0.0                         # Deterministic for reproducibility
 max_tokens = 2048                         # Standard eval output length
@@ -31,7 +31,7 @@ context_from_memory = false               # No memory injection during eval
 # ═══════════════════════════════════════════════════════════════
 [tools.storage]
 default_backend = "sqlite"
-db_path = "~/.openjarvis/memory.db"
+db_path = "~/.sunday/memory.db"
 
 [tools.mcp]
 enabled = true
@@ -40,32 +40,17 @@ enabled = true
 # PILLAR 4: Engine — The Inference Runtime
 # ═══════════════════════════════════════════════════════════════
 [engine]
-default = "vllm"
+default = "llamacpp"
 
 [engine.vllm]
-host = "http://localhost:8001"            # vLLM serving port
+host = "http://localhost:8001"
 
 [engine.ollama]
 host = "http://localhost:11434"
 
-[engine.sglang]
-host = "http://localhost:30000"
-
 [engine.llamacpp]
-host = "http://localhost:8080"
-
-[engine.exo]
-host = "http://localhost:52415"
-
-[engine.nexa]
-host = "http://localhost:18181"
-# device = "npu"  # optional: cpu, gpu, npu
-
-[engine.uzu]
-host = "http://localhost:8080"
-
-[engine.apple_fm]
-host = "http://localhost:8079"
+host = "http://localhost:8081"
+models_dir = "c:/Users/hello/Desktop/Project_me/SUNDAY/llama-cpp/models"
 
 # ═══════════════════════════════════════════════════════════════
 # PILLAR 5: Learning — Improvement Methodologies
@@ -92,8 +77,8 @@ efficiency_weight = 0.1
 # Supporting config
 # ═══════════════════════════════════════════════════════════════
 [telemetry]
-enabled = true
-db_path = "~/.openjarvis/telemetry.db"
+enabled = false
+db_path = "~/.sunday/telemetry.db"
 gpu_metrics = true
 gpu_poll_interval_ms = 50
 energy_vendor = ""                       # Auto-detect; or force "nvidia"/"amd"/"apple"/"cpu_rapl"
@@ -102,8 +87,8 @@ steady_state_window = 5                  # Sliding window size for CV stability 
 steady_state_threshold = 0.05            # Coefficient of variation threshold for steady state
 
 [traces]
-enabled = true                            # Record traces for analysis
-db_path = "~/.openjarvis/traces.db"
+enabled = false                           # Record traces for analysis
+db_path = "~/.sunday/traces.db"
 
 [server]
 host = "0.0.0.0"

@@ -7,20 +7,20 @@ search:
 
 # Python SDK
 
-The OpenJarvis Python SDK provides a high-level interface for interacting with local inference engines, managing memory, and running agent workflows. The primary entry point is the `Jarvis` class.
+The SUNDAY Python SDK provides a high-level interface for interacting with local inference engines, managing memory, and running agent workflows. The primary entry point is the `Jarvis` class.
 
 ## Installation
 
 ```bash
-git clone https://github.com/open-jarvis/OpenJarvis.git
-cd OpenJarvis
+git clone https://github.com/open-sunday/SUNDAY.git
+cd SUNDAY
 uv sync
 ```
 
 ## Quick Start
 
 ```python
-from openjarvis import Jarvis
+from sunday import Jarvis
 
 j = Jarvis()
 response = j.ask("What is the capital of France?")
@@ -51,7 +51,7 @@ Jarvis(
 | `engine_key`  | `str`            | `None`  | Override the engine backend (`"ollama"`, `"vllm"`, etc.)       |
 | `model`       | `str`            | `None`  | Override the default model (e.g., `"qwen3:8b"`)               |
 
-If no `config` or `config_path` is provided, the SDK loads configuration from the default location (`~/.openjarvis/config.toml`), falling back to built-in defaults.
+If no `config` or `config_path` is provided, the SDK loads configuration from the default location (`~/.sunday/config.toml`), falling back to built-in defaults.
 
 **Examples:**
 
@@ -74,7 +74,7 @@ j = Jarvis(config_path="/path/to/config.toml")
 | Property  | Type           | Description                       |
 |-----------|----------------|-----------------------------------|
 | `config`  | `JarvisConfig` | The active configuration object   |
-| `version` | `str`          | The OpenJarvis version string     |
+| `version` | `str`          | The SUNDAY version string     |
 | `memory`  | `MemoryHandle` | Proxy for memory operations       |
 
 ---
@@ -349,7 +349,7 @@ j.close()
 ## Complete Example
 
 ```python
-from openjarvis import Jarvis
+from sunday import Jarvis
 
 # Initialize with auto-detected engine
 j = Jarvis(model="qwen3:8b")

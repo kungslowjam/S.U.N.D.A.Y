@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-OpenJarvis is a local-first personal AI agent framework. The Python package lives in `src/openjarvis/`, with a Rust workspace under `rust/` (built via PyO3/maturin) and a bundled Node.js runner for the Claude Agent SDK. The CLI entry point is `jarvis` → `openjarvis.cli:main`.
+SUNDAY is a local-first personal AI agent framework. The Python package lives in `src/sunday/`, with a Rust workspace under `rust/` (built via PyO3/maturin) and a bundled Node.js runner for the Claude Agent SDK. The CLI entry point is `sunday` → `sunday.cli:main`.
 
 ## Commands
 
@@ -14,7 +14,7 @@ Use `uv` for everything Python; the package is installed editable into the proje
 
 ```bash
 uv sync --extra dev                                                 # core + dev tools (pytest, ruff, respx, pytest-cov)
-uv run maturin develop -m rust/crates/openjarvis-python/Cargo.toml  # required for memory + security features
+uv run maturin develop -m rust/crates/sunday-python/Cargo.toml  # required for memory + security features
 uv run pre-commit install                                           # ruff lint + format on commit
 ```
 
@@ -29,7 +29,7 @@ uv run pytest tests/ -v                              # full suite
 uv run pytest tests/core/test_registry.py -v         # one file
 uv run pytest tests/core/test_registry.py::test_register_and_get -v   # one test
 uv run pytest tests/ -m "not live and not cloud"     # what CI runs
-uv run pytest tests/ --cov=openjarvis --cov-report=term-missing
+uv run pytest tests/ --cov=sunday --cov-report=term-missing
 ```
 
 Markers gate hardware/network-dependent tests: `live` (running engine), `cloud` (API keys), `nvidia`, `amd`, `apple`, `macos15`, `slow`, `live_channel`. CI runs `not live and not cloud` with `--cov-fail-under=60`.
@@ -51,13 +51,13 @@ cd rust && cargo clippy --workspace --all-targets -- -D warnings   # CI gate (wa
 cd rust && cargo test --workspace
 ```
 
-The Rust workspace at `rust/Cargo.toml` mirrors Python module names (`openjarvis-core`, `openjarvis-engine`, `openjarvis-agents`, etc.). `openjarvis-python` is the PyO3 bridge crate that gets built into the Python package via maturin; the bridge lives at `src/openjarvis/_rust_bridge.py`.
+The Rust workspace at `rust/Cargo.toml` mirrors Python module names (`sunday-core`, `sunday-engine`, `sunday-agents`, etc.). `sunday-python` is the PyO3 bridge crate that gets built into the Python package via maturin; the bridge lives at `src/sunday/_rust_bridge.py`.
 
 ## Architecture
 
 ### Registry pattern (load-bearing)
 
-Every extensible primitive — engines, agents, tools, memory backends, channels, router policies, benchmarks, connectors, skills, speech/TTS, compression — is registered through a typed registry in `src/openjarvis/core/registry.py` with the decorator form:
+Every extensible primitive — engines, agents, tools, memory backends, channels, router policies, benchmarks, connectors, skills, speech/TTS, compression — is registered through a typed registry in `src/sunday/core/registry.py` with the decorator form:
 
 ```python
 @EngineRegistry.register("my_engine")
@@ -78,7 +78,7 @@ Backends with optional packages live behind `try / except ImportError` at import
 
 ```python
 try:
-    import openjarvis.memory.faiss_backend  # noqa: F401  (registers on import)
+    import sunday.memory.faiss_backend  # noqa: F401  (registers on import)
 except ImportError:
     pass
 ```
@@ -87,7 +87,7 @@ The package always loads even when extras like `faiss-cpu`, `vllm`, `colbert-ai`
 
 ### Primitives map (where to look)
 
-- `core/` — `config.py` (JarvisConfig + hardware detection), `events.py` (EventBus), `registry.py`, `types.py` (`Message`, `ModelSpec`, `ToolResult`, `Trace`).
+- `core/` — `config.py` (SundayConfig + hardware detection), `events.py` (EventBus), `registry.py`, `types.py` (`Message`, `ModelSpec`, `ToolResult`, `Trace`).
 - `engine/` — inference backends. `_stubs.py` defines `InferenceEngine` ABC; `_discovery.py` auto-probes which engines are running; `openai_compat_engines.py` registers vLLM/SGLang/llama.cpp/MLX/LM Studio data-driven via the OpenAI-compatible wrapper.
 - `agents/` — `_stubs.py` has `BaseAgent`, `ToolUsingAgent`, `AgentContext`, `AgentResult`. `claude_code.py` shells out to Node via `claude_code_runner/` (bundled into the wheel by hatch — see `[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml`).
 - `intelligence/` — model catalog and routing (`HeuristicRouter`).
@@ -133,7 +133,7 @@ docs/design/2026-05-05-apple-silicon-pearl-mining-design.md.
 `REVIEW.md` is the explicit PR-review rubric used by automated reviewers. The high-leverage things to check on changes touching this repo:
 
 - **Registry compliance** — new components register through the canonical registry, not ad-hoc factories.
-- **PyO3 boundaries** — type conversions, error propagation, GIL handling in `rust/crates/openjarvis-python/` and consumers via `_rust_bridge.py`.
+- **PyO3 boundaries** — type conversions, error propagation, GIL handling in `rust/crates/sunday-python/` and consumers via `_rust_bridge.py`.
 - **Async correctness** — no missing `await`, no blocking calls inside async paths.
 - **Event bus integration** — lifecycle events flow through `core.events.EventBus`, not bespoke callbacks.
 - **Local-first data isolation** — secrets stay out of code, validation lives at boundaries (user input, external APIs).

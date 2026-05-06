@@ -7,17 +7,17 @@ Use a frontier model as a meta-engineer to automatically improve your local agen
 ### 1. Initialize
 
 ```bash
-jarvis learning init
+sunday learning init
 ```
 
-This creates the distillation directory layout under `~/.openjarvis/learning/` and initializes a git checkpoint repo at `~/.openjarvis/.git` for tracking config changes.
+This creates the distillation directory layout under `~/.sunday/learning/` and initializes a git checkpoint repo at `~/.sunday/.git` for tracking config changes.
 
 ### 2. Run your first session
 
 Once you have at least 20 traces from regular use:
 
 ```bash
-jarvis learning run
+sunday learning run
 ```
 
 The system will:
@@ -29,8 +29,8 @@ The system will:
 ### 3. Check results
 
 ```bash
-jarvis learning history
-jarvis learning show <session-id>
+sunday learning history
+sunday learning show <session-id>
 ```
 
 ## How a Learning Session Works
@@ -61,7 +61,7 @@ The session is persisted to `learning.db` (SQLite index) and `session.json` (aut
 
 ## Configuration
 
-Add to `~/.openjarvis/config.toml`:
+Add to `~/.sunday/config.toml`:
 
 ```toml
 [learning.distillation]
@@ -124,7 +124,7 @@ Every edit is assigned a risk tier that controls how it's applied:
 | Tier | Behavior | Default ops |
 |------|----------|-------------|
 | **auto** | Applied automatically if benchmark gate passes | Model routing, model params, tool add/remove/description, agent params |
-| **review** | Queued for user approval in `jarvis learning review` | System prompt edits, agent class changes, few-shot exemplars |
+| **review** | Queued for user approval in `sunday learning review` | System prompt edits, agent class changes, few-shot exemplars |
 | **manual** | Never auto-applied; requires explicit approval | LoRA fine-tuning (v2) |
 
 The tier is assigned deterministically from the edit operation — the teacher cannot override it.
@@ -135,31 +135,31 @@ When edits land in the review queue:
 
 ```bash
 # List all pending edits
-jarvis learning review
+sunday learning review
 
 # Approve an edit (still goes through the benchmark gate)
-jarvis learning approve <edit-id>
+sunday learning approve <edit-id>
 
 # Reject an edit with a reason
-jarvis learning reject <edit-id> --reason "prompt change too aggressive"
+sunday learning reject <edit-id> --reason "prompt change too aggressive"
 ```
 
 Even approved edits are gated by the benchmark — approval means "try it", not "force it".
 
 ## Rollback and History
 
-Every edit creates a git commit in the checkpoint repo at `~/.openjarvis/.git`. This is separate from your OpenJarvis source repo.
+Every edit creates a git commit in the checkpoint repo at `~/.sunday/.git`. This is separate from your SUNDAY source repo.
 
 ```bash
 # List past sessions
-jarvis learning history --limit 20
+sunday learning history --limit 20
 
 # Show session details (diagnosis, plan, outcomes, cost)
-jarvis learning show <session-id>
+sunday learning show <session-id>
 
 # Rollback a session (creates new revert commits, preserves history)
-jarvis learning rollback <session-id>
-jarvis learning rollback --last
+sunday learning rollback <session-id>
+sunday learning rollback --last
 ```
 
 Rollback never rewrites git history — it creates new revert commits so the audit trail stays intact.
@@ -172,7 +172,7 @@ Three cost boundaries prevent runaway spending:
 2. **`max_synthesis_cost_usd_per_refresh`** (default $2.00) — caps the cost of generating gold answers for new benchmark tasks. Separate from the session budget.
 3. **`teacher_model`** — choose a cheaper model (e.g., `claude-sonnet-4-6`) to reduce per-token costs at the expense of diagnosis quality.
 
-Cost is tracked on every `LearningSession` as `teacher_cost_usd` and surfaced in `jarvis learning show`.
+Cost is tracked on every `LearningSession` as `teacher_cost_usd` and surfaced in `sunday learning show`.
 
 ## The Personal Benchmark
 
@@ -188,38 +188,38 @@ The benchmark is your acceptance gate's source of truth — a set of tasks disti
 
 ```bash
 # Manual refresh
-jarvis learning benchmark refresh
+sunday learning benchmark refresh
 
 # Show stats
-jarvis learning benchmark show
+sunday learning benchmark show
 ```
 
 ## Cold Start: What to Expect on Day One
 
 The system needs real usage data before it can learn:
 
-- **< 20 traces:** `jarvis learning run` returns "Not enough traces yet." Triggers are no-ops.
+- **< 20 traces:** `sunday learning run` returns "Not enough traces yet." Triggers are no-ops.
 - **20+ traces, < 10 high-feedback:** Enough for diagnosis, but no benchmark yet. Sessions will run diagnosis but can't gate edits.
 - **10+ high-feedback traces:** Bootstrap benchmark is created automatically (`personal_v1.json`). Full learning loop is available.
 
-**Getting there faster:** Use OpenJarvis normally and provide feedback on results (thumbs up/down in the UI, or `jarvis feedback` in the CLI).
+**Getting there faster:** Use SUNDAY normally and provide feedback on results (thumbs up/down in the UI, or `sunday feedback` in the CLI).
 
 ## Troubleshooting
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Not enough traces yet" | Fewer than 20 traces in the store | Use OpenJarvis more, provide feedback |
-| "Working tree dirty, cannot stage" | Manual edits to `~/.openjarvis/config.toml` during a session | Commit or revert manual changes first |
+| "Not enough traces yet" | Fewer than 20 traces in the store | Use SUNDAY more, provide feedback |
+| "Working tree dirty, cannot stage" | Manual edits to `~/.sunday/config.toml` during a session | Commit or revert manual changes first |
 | "All clusters dropped: insufficient evidence" | Teacher diagnosed clusters but couldn't reproduce failures | Check that the student is actually failing on the flagged tasks |
-| "ConfigurationError: distillation root inside source tree" | `OPENJARVIS_HOME` points inside the repo | Set `OPENJARVIS_HOME` to `~/.openjarvis` (default) or another external dir |
+| "ConfigurationError: distillation root inside source tree" | `OPENSUNDAY_HOME` points inside the repo | Set `OPENSUNDAY_HOME` to `~/.sunday` (default) or another external dir |
 | "Personal benchmark is empty" | Not enough high-feedback traces yet | Provide feedback on 10+ traces with score >= 0.7 |
 
 ## Where Artifacts Live
 
-All distillation artifacts live under `~/.openjarvis/` (never inside the source repo):
+All distillation artifacts live under `~/.sunday/` (never inside the source repo):
 
 ```
-~/.openjarvis/
+~/.sunday/
 ├── config.toml              # Your configuration (git-tracked by checkpoint)
 ├── agents/                  # Agent prompts (git-tracked)
 ├── tools/                   # Tool descriptions (git-tracked)
@@ -236,9 +236,9 @@ All distillation artifacts live under `~/.openjarvis/` (never inside the source 
 For continuous learning:
 
 ```bash
-jarvis learning daemon start    # Start background watcher
-jarvis learning daemon status   # Check if running
-jarvis learning daemon stop     # Stop the daemon
+sunday learning daemon start    # Start background watcher
+sunday learning daemon status   # Check if running
+sunday learning daemon stop     # Stop the daemon
 ```
 
 The daemon runs the scheduled trigger (default: daily at 03:00) and the cluster trigger (watches for failure patterns in real-time).
@@ -247,5 +247,5 @@ The daemon runs the scheduled trigger (default: daily at 03:00) and the cluster 
 
 - [Architecture: Learning](../architecture/learning.md#distillation-frontier-driven-harness-learning) — internal architecture of the distillation subsystem
 - [User Guide: Evaluations](evaluations.md) — the eval infrastructure that powers the benchmark gate
-- [User Guide: CLI](cli.md#jarvis-learning) — full CLI reference
+- [User Guide: CLI](cli.md#sunday-learning) — full CLI reference
 - [Getting Started: Configuration](../getting-started/configuration.md) — all config knobs

@@ -80,7 +80,7 @@ Adapter that makes any skill look like a regular `BaseTool` to agents:
 Two-pass parser for agentskills.io-compatible SKILL.md frontmatter:
 
 1. **Strict pass** — validates required fields (`name`, `description`), length limits, kebab-case naming rules
-2. **Tolerant pass** — maps non-spec vendor fields to canonical locations via `FIELD_MAPPING` table. Unmapped fields are logged and preserved in `metadata.openjarvis.original_frontmatter`
+2. **Tolerant pass** — maps non-spec vendor fields to canonical locations via `FIELD_MAPPING` table. Unmapped fields are logged and preserved in `metadata.sunday.original_frontmatter`
 
 The mapping table is data, not code paths. Adding support for new vendor fields means adding entries — no logic changes.
 
@@ -116,7 +116,7 @@ Takes a `ResolvedSkill` from a source resolver and installs it on disk:
 
 ### SkillOverlay (`skills/overlay.py`)
 
-Sidecar storage for optimization output at `~/.openjarvis/learning/skills/<name>/optimized.toml`:
+Sidecar storage for optimization output at `~/.sunday/learning/skills/<name>/optimized.toml`:
 
 ```toml
 [optimized]
@@ -200,7 +200,7 @@ Skills can compose other skills. At discovery time, SkillManager validates:
 ## File Layout
 
 ```
-src/openjarvis/skills/
+src/sunday/skills/
 ├── __init__.py           # Public exports
 ├── types.py              # SkillManifest, SkillStep
 ├── manager.py            # SkillManager

@@ -56,10 +56,10 @@ def main() -> None:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     try:
-        from openjarvis import Jarvis
+        from sunday import Jarvis
     except ImportError:
         print(
-            "Error: openjarvis is not installed. "
+            "Error: sunday is not installed. "
             "Install it with:  uv sync --extra dev",
             file=sys.stderr,
         )
@@ -89,7 +89,7 @@ def main() -> None:
         print(
             f"Error: could not initialize Jarvis -- {exc}\n\n"
             "Make sure an inference engine is running (e.g., ollama serve) "
-            "and the openjarvis package is installed (uv sync).",
+            "and the sunday package is installed (uv sync).",
             file=sys.stderr,
         )
         sys.exit(1)

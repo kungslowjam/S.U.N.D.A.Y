@@ -7,7 +7,7 @@ Run manually::
 
 Or register as a scheduled task::
 
-    jarvis scheduler create "Weekly code review" --type cron --value "0 8 * * 1"
+    sunday scheduler create "Weekly code review" --type cron --value "0 8 * * 1"
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ def main(repo_path: str, days: int, model: str | None, engine_key: str | None) -
     )
 
     try:
-        from openjarvis import Jarvis
+        from sunday import Jarvis
 
         kwargs: dict[str, str | None] = {}
         if model:
@@ -75,7 +75,7 @@ def main(repo_path: str, days: int, model: str | None, engine_key: str | None) -
         click.echo(
             f"Error: Could not initialize Jarvis: {exc}\n\n"
             "Make sure an inference engine is running (e.g. `ollama serve`) "
-            "and the openjarvis package is installed (`uv sync`).",
+            "and the sunday package is installed (`uv sync`).",
             err=True,
         )
         raise SystemExit(1) from exc

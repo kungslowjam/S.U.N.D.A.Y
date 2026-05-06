@@ -1,9 +1,9 @@
 # Pearl Model Enablement
 
 This page tracks the work required to make a new Hugging Face model mineable
-through Pearl's vLLM miner and OpenJarvis.
+through Pearl's vLLM miner and SUNDAY.
 
-OpenJarvis can point `vllm-pearl` at a model id, but a raw Hugging Face model is
+SUNDAY can point `vllm-pearl` at a model id, but a raw Hugging Face model is
 not enough. The Pearl vLLM plugin expects a Pearl-compatible quantized model
 whose metadata marks mining layers for 7-bit NoisyGEMM and non-mining layers
 for the vanilla Pearl GEMM path.
@@ -12,10 +12,10 @@ for the vanilla Pearl GEMM path.
 
 | Raw model | Planned Pearl model | Status | Tracking |
 |---|---|---|---|
-| `Qwen/Qwen3.5-9B` | `pearl-ai/Qwen3.5-9B-pearl` | Planned | [#316](https://github.com/open-jarvis/OpenJarvis/issues/316) |
-| `Qwen/Qwen3.6-27B` | `pearl-ai/Qwen3.6-27B-pearl` | Planned | [#317](https://github.com/open-jarvis/OpenJarvis/issues/317) |
-| `google/gemma-4-E4B-it` | `pearl-ai/Gemma-4-E4B-it-pearl` | Planned | [#318](https://github.com/open-jarvis/OpenJarvis/issues/318) |
-| `google/gemma-4-31B-it` | `pearl-ai/Gemma-4-31B-it-pearl` | Planned | [#319](https://github.com/open-jarvis/OpenJarvis/issues/319) |
+| `Qwen/Qwen3.5-9B` | `pearl-ai/Qwen3.5-9B-pearl` | Planned | [#316](https://github.com/open-sunday/SUNDAY/issues/316) |
+| `Qwen/Qwen3.6-27B` | `pearl-ai/Qwen3.6-27B-pearl` | Planned | [#317](https://github.com/open-sunday/SUNDAY/issues/317) |
+| `google/gemma-4-E4B-it` | `pearl-ai/Gemma-4-E4B-it-pearl` | Planned | [#318](https://github.com/open-sunday/SUNDAY/issues/318) |
+| `google/gemma-4-31B-it` | `pearl-ai/Gemma-4-31B-it-pearl` | Planned | [#319](https://github.com/open-sunday/SUNDAY/issues/319) |
 
 The current validated model remains:
 
@@ -26,8 +26,8 @@ pearl-ai/Llama-3.3-70B-Instruct-pearl
 ## Current Validation Findings
 
 The H100 smoke run validated the default Llama Pearl model end to end through
-`jarvis mine start`, vLLM `/v1/models`, OpenJarvis inference routing, Pearl
-gateway template refresh, and `jarvis mine validate-model`.
+`sunday mine start`, vLLM `/v1/models`, SUNDAY inference routing, Pearl
+gateway template refresh, and `sunday mine validate-model`.
 
 The Qwen and Gemma targets remain planned:
 
@@ -38,7 +38,7 @@ The Qwen and Gemma targets remain planned:
   artifact is missing processor/preprocessor metadata required by Transformers.
   A local cache experiment proved the processor can be loaded only after
   injecting metadata from `google/gemma-4-31B-it`; that is not sufficient for
-  OpenJarvis promotion because a clean user install would still fail.
+  SUNDAY promotion because a clean user install would still fail.
 
 ## Enablement Checklist
 
@@ -56,7 +56,7 @@ The Qwen and Gemma targets remain planned:
    - Publish under the planned `pearl-ai/*-pearl` id or a staging namespace.
 
 3. Validate the Pearl vLLM plugin path.
-   - Run `jarvis mine inspect-model --model <pearl-model-id>
+   - Run `sunday mine inspect-model --model <pearl-model-id>
      --allow-planned` before starting the miner.
    - Model loads in Pearl's `vllm-miner` container.
    - vLLM registers Pearl's quantization plugin.
@@ -69,23 +69,23 @@ The Qwen and Gemma targets remain planned:
    - `pearl-gateway` receives work.
    - NoisyGEMM submits candidate proofs.
    - Gateway reports metrics.
-   - `jarvis mine status` parses those metrics.
+   - `sunday mine status` parses those metrics.
 
-5. Promote the model in OpenJarvis.
+5. Promote the model in SUNDAY.
    - Change its registry status from `planned` to `validated`.
    - Set measured VRAM and context defaults.
    - Add the model to user docs.
    - Attach validation logs to the PR.
 
-## OpenJarvis Registry
+## SUNDAY Registry
 
 Model support metadata lives in:
 
 ```text
-src/openjarvis/mining/_models.py
+src/sunday/mining/_models.py
 ```
 
-`jarvis mine models` renders that registry. Planned models are visible to users
+`sunday mine models` renders that registry. Planned models are visible to users
 but blocked by capability detection until the Pearl model artifact and H100/H200
 validation exist.
 
@@ -93,13 +93,13 @@ validation exist.
 
 A model is `validated` only when all of these pass on real hardware:
 
-- `jarvis mine inspect-model --model <pearl-model-id> --allow-planned`
-- `jarvis mine init --model <pearl-model-id>`
-- `jarvis mine start`
+- `sunday mine inspect-model --model <pearl-model-id> --allow-planned`
+- `sunday mine init --model <pearl-model-id>`
+- `sunday mine start`
 - `curl http://127.0.0.1:8000/v1/models`
-- `jarvis ask "Say hello in one sentence."`
-- `jarvis mine status`
-- `jarvis mine validate-model --model <pearl-model-id> --allow-planned --prompt
+- `sunday ask "Say hello in one sentence."`
+- `sunday mine status`
+- `sunday mine validate-model --model <pearl-model-id> --allow-planned --prompt
   "Say hello in one sentence." --output <artifact>.json`
 - Pearl gateway metrics show the mining path is active.
 - No block/share submission errors appear in gateway or miner logs.
@@ -112,4 +112,4 @@ Pearl's NoisyGEMM and submission path.
 Use the `Pearl Model Validation` GitHub issue template for each candidate model.
 The issue should hold the quantization recipe, hardware details, command output,
 metrics excerpts, and the PR that changes the model status to `validated`.
-Attach the JSON artifact from `jarvis mine validate-model --output` to the issue.
+Attach the JSON artifact from `sunday mine validate-model --output` to the issue.

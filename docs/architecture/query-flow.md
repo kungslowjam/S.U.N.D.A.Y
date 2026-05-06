@@ -1,6 +1,6 @@
 # Query Flow
 
-This page traces the end-to-end journey of a user query through the OpenJarvis system, from the moment it enters the CLI or SDK to the final response and telemetry recording.
+This page traces the end-to-end journey of a user query through the SUNDAY system, from the moment it enters the CLI or SDK to the final response and telemetry recording.
 
 ---
 
@@ -19,7 +19,7 @@ sequenceDiagram
     participant TEL as Telemetry
     participant TRC as Trace Collector
 
-    User->>CLI: jarvis ask "query" / j.ask("query")
+    User->>CLI: sunday ask "query" / j.ask("query")
     CLI->>CFG: load_config()
     CFG-->>CLI: JarvisConfig (hardware, engine defaults)
 
@@ -70,7 +70,7 @@ sequenceDiagram
 
 ## Direct Mode vs Agent Mode
 
-OpenJarvis supports two query processing paths, selected by the `--agent` CLI flag or the `agent` parameter in the SDK.
+SUNDAY supports two query processing paths, selected by the `--agent` CLI flag or the `agent` parameter in the SDK.
 
 ### Direct Mode (Default)
 
@@ -78,7 +78,7 @@ In direct mode, the query goes straight to the inference engine with optional me
 
 ```bash
 # CLI
-jarvis ask "What is the capital of France?"
+sunday ask "What is the capital of France?"
 
 # SDK
 j = Jarvis()
@@ -91,7 +91,7 @@ In agent mode, the query is handled by a named agent that can perform multiple i
 
 ```bash
 # CLI
-jarvis ask --agent orchestrator --tools calculator,think "What is 2^10 + 3^5?"
+sunday ask --agent orchestrator --tools calculator,think "What is 2^10 + 3^5?"
 
 # SDK
 response = j.ask("What is 2^10 + 3^5?", agent="orchestrator", tools=["calculator"])
@@ -106,7 +106,7 @@ response = j.ask("What is 2^10 + 3^5?", agent="orchestrator", tools=["calculator
 The journey begins with loading the system configuration:
 
 ```python
-config = load_config()  # Reads ~/.openjarvis/config.toml
+config = load_config()  # Reads ~/.sunday/config.toml
 ```
 
 This step:
@@ -149,8 +149,8 @@ for ek, model_ids in all_models.items():
 If no model was explicitly specified, the router policy selects one:
 
 ```python
-from openjarvis.learning import ensure_registered
-from openjarvis.learning.router import build_routing_context
+from sunday.learning import ensure_registered
+from sunday.learning.router import build_routing_context
 ensure_registered()  # Ensure learning policies are registered
 
 policy_key = router_policy or config.learning.routing.policy
@@ -244,7 +244,7 @@ class TelemetryRecord:
     metadata: Dict[str, Any]
 ```
 
-The `TelemetryStore` subscribes to `TELEMETRY_RECORD` events on the EventBus and writes records to `~/.openjarvis/telemetry.db`.
+The `TelemetryStore` subscribes to `TELEMETRY_RECORD` events on the EventBus and writes records to `~/.sunday/telemetry.db`.
 
 ### Step 9: Trace Recording
 
@@ -290,7 +290,7 @@ TRACE_COMPLETE      {trace: Trace(...)}
 The `Jarvis` class in `sdk.py` provides the same query flow through a Python API:
 
 ```python
-from openjarvis import Jarvis
+from sunday import Jarvis
 
 j = Jarvis(model="qwen3:8b", engine_key="ollama")
 

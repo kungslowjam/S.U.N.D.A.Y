@@ -1,21 +1,21 @@
 # CLI Reference
 
-OpenJarvis provides a command-line interface through the `jarvis` command. Built on [Click](https://click.palletsprojects.com/), it offers subcommands for querying models, managing memory, running benchmarks, and serving an OpenAI-compatible API.
+SUNDAY provides a command-line interface through the `sunday` command. Built on [Click](https://click.palletsprojects.com/), it offers subcommands for querying models, managing memory, running benchmarks, and serving an OpenAI-compatible API.
 
 ## Global Options
 
 ```bash
-jarvis --version   # Print the OpenJarvis version
-jarvis --help      # Show top-level help with all subcommands
+sunday --version   # Print the SUNDAY version
+sunday --help      # Show top-level help with all subcommands
 ```
 
-## `jarvis init`
+## `sunday init`
 
-Detect local hardware (CPU, GPU, RAM) and generate a configuration file at `~/.openjarvis/config.toml`.
+Detect local hardware (CPU, GPU, RAM) and generate a configuration file at `~/.sunday/config.toml`.
 
 ```bash
-jarvis init           # Interactive — refuses to overwrite existing config
-jarvis init --force   # Overwrite existing config without prompting
+sunday init           # Interactive — refuses to overwrite existing config
+sunday init --force   # Overwrite existing config without prompting
 ```
 
 | Option    | Description                                   |
@@ -45,12 +45,12 @@ Config written successfully.
 
 ---
 
-## `jarvis ask`
+## `sunday ask`
 
 Send a query to the inference engine (directly or through an agent) and print the response.
 
 ```bash
-jarvis ask "What is the capital of France?"
+sunday ask "What is the capital of France?"
 ```
 
 ### Options
@@ -72,37 +72,37 @@ jarvis ask "What is the capital of France?"
 **Direct mode** (default) sends the query straight to the inference engine:
 
 ```bash
-jarvis ask "Explain quantum computing"
+sunday ask "Explain quantum computing"
 ```
 
 **Agent mode** routes the query through an agent that can use tools and manage multi-turn interactions:
 
 ```bash
-jarvis ask --agent orchestrator "What is 2+2?"
-jarvis ask --agent orchestrator --tools calculator,think "Calculate sqrt(144) + 3^2"
-jarvis ask --agent simple "Hello"
+sunday ask --agent orchestrator "What is 2+2?"
+sunday ask --agent orchestrator --tools calculator,think "Calculate sqrt(144) + 3^2"
+sunday ask --agent simple "Hello"
 ```
 
 ### Usage Examples
 
 ```bash
 # Basic query
-jarvis ask "What is machine learning?"
+sunday ask "What is machine learning?"
 
 # Specify a model
-jarvis ask -m qwen3:8b "Summarize this concept"
+sunday ask -m qwen3:8b "Summarize this concept"
 
 # Use the orchestrator agent with tools
-jarvis ask --agent orchestrator --tools calculator "What is 15% of 340?"
+sunday ask --agent orchestrator --tools calculator "What is 15% of 340?"
 
 # Get JSON output
-jarvis ask --json "Hello"
+sunday ask --json "Hello"
 
 # Disable memory context injection
-jarvis ask --no-context "Tell me about Python"
+sunday ask --no-context "Tell me about Python"
 
 # Set maximum token generation
-jarvis ask --max-tokens 2048 "Write a detailed essay about AI"
+sunday ask --max-tokens 2048 "Write a detailed essay about AI"
 ```
 
 ### JSON Output Format
@@ -138,16 +138,16 @@ When using `--json` in **agent mode**, the output includes:
 
 ---
 
-## `jarvis model`
+## `sunday model`
 
 Manage and inspect language models available on running engines.
 
-### `jarvis model list`
+### `sunday model list`
 
 List all models available from running inference engines, displayed as a Rich table with model parameters, context length, and VRAM requirements.
 
 ```bash
-jarvis model list
+sunday model list
 ```
 
 **Example output:**
@@ -162,12 +162,12 @@ jarvis model list
 └─────────┴────────────────┴────────┴─────────┴──────┘
 ```
 
-### `jarvis model info <model>`
+### `sunday model info <model>`
 
 Show detailed information about a specific model.
 
 ```bash
-jarvis model info qwen3:8b
+sunday model info qwen3:8b
 ```
 
 **Example output:**
@@ -186,12 +186,12 @@ jarvis model info qwen3:8b
 └───────────────────────────────────────────┘
 ```
 
-### `jarvis model pull <model>`
+### `sunday model pull <model>`
 
 Download a model via Ollama. Shows a progress bar during download.
 
 ```bash
-jarvis model pull qwen3:8b
+sunday model pull qwen3:8b
 ```
 
 !!! note
@@ -199,28 +199,28 @@ jarvis model pull qwen3:8b
 
 ---
 
-## `jarvis pearl`
+## `sunday pearl`
 
-Access Pearl's native node, wallet, and RPC tools from the OpenJarvis CLI.
+Access Pearl's native node, wallet, and RPC tools from the SUNDAY CLI.
 
 ```bash
-jarvis pearl doctor
-jarvis pearl node -- <pearld args>
-jarvis pearl wallet -- <oyster args>
-jarvis pearl ctl -- <prlctl args>
-jarvis pearl address
+sunday pearl doctor
+sunday pearl node -- <pearld args>
+sunday pearl wallet -- <oyster args>
+sunday pearl ctl -- <prlctl args>
+sunday pearl address
 ```
 
-All Pearl wrapper commands use the `jarvis pearl <command>` shape. The
+All Pearl wrapper commands use the `sunday pearl <command>` shape. The
 pass-through commands map to Pearl's native binaries:
 
-| OpenJarvis command | Pearl binary | Use |
+| SUNDAY command | Pearl binary | Use |
 |--------------------|--------------|-----|
-| `jarvis pearl doctor` | n/a | Check whether `pearld`, `oyster`, and `prlctl` are discoverable |
-| `jarvis pearl node` | `pearld` | Run the Pearl full node |
-| `jarvis pearl wallet` | `oyster` | Run the Oyster wallet daemon |
-| `jarvis pearl ctl` | `prlctl` | Query Pearl node or wallet RPC |
-| `jarvis pearl address` | `prlctl --wallet getnewaddress` | Generate a wallet address from Oyster |
+| `sunday pearl doctor` | n/a | Check whether `pearld`, `oyster`, and `prlctl` are discoverable |
+| `sunday pearl node` | `pearld` | Run the Pearl full node |
+| `sunday pearl wallet` | `oyster` | Run the Oyster wallet daemon |
+| `sunday pearl ctl` | `prlctl` | Query Pearl node or wallet RPC |
+| `sunday pearl address` | `prlctl --wallet getnewaddress` | Generate a wallet address from Oyster |
 
 Use `PEARL_HOME=/path/to/pearl` or `--pearl-home /path/to/pearl` if Pearl's
 `bin/` directory is not on `PATH`. See the [Pearl CLI guide](pearl.md) for
@@ -228,19 +228,19 @@ examples.
 
 ---
 
-## `jarvis memory`
+## `sunday memory`
 
 Manage the document memory store for retrieval-augmented generation.
 
-### `jarvis memory index <path>`
+### `sunday memory index <path>`
 
 Index documents from a file or directory into the memory store.
 
 ```bash
-jarvis memory index ./docs/
-jarvis memory index ./notes.md
-jarvis memory index ./data/ --chunk-size 256 --chunk-overlap 32
-jarvis memory index ./docs/ --backend sqlite
+sunday memory index ./docs/
+sunday memory index ./notes.md
+sunday memory index ./data/ --chunk-size 256 --chunk-overlap 32
+sunday memory index ./docs/ --backend sqlite
 ```
 
 | Option                      | Type   | Default | Description                          |
@@ -251,14 +251,14 @@ jarvis memory index ./docs/ --backend sqlite
 
 The ingestion pipeline supports text, markdown, code files, and PDF (with `pdfplumber` installed). Binary files and hidden directories are automatically skipped.
 
-### `jarvis memory search <query>`
+### `sunday memory search <query>`
 
 Search the memory store for relevant document chunks.
 
 ```bash
-jarvis memory search "machine learning basics"
-jarvis memory search -k 10 "neural networks"
-jarvis memory search --backend faiss "embeddings"
+sunday memory search "machine learning basics"
+sunday memory search -k 10 "neural networks"
+sunday memory search --backend faiss "embeddings"
 ```
 
 | Option             | Type   | Default | Description                          |
@@ -268,13 +268,13 @@ jarvis memory search --backend faiss "embeddings"
 
 Results are displayed in a table with rank, score, source file, and a content preview.
 
-### `jarvis memory stats`
+### `sunday memory stats`
 
 Show memory store statistics including document count and database size.
 
 ```bash
-jarvis memory stats
-jarvis memory stats --backend sqlite
+sunday memory stats
+sunday memory stats --backend sqlite
 ```
 
 | Option             | Type   | Default | Description                          |
@@ -283,32 +283,32 @@ jarvis memory stats --backend sqlite
 
 ---
 
-## `jarvis telemetry`
+## `sunday telemetry`
 
 Query and manage inference telemetry data stored in SQLite.
 
-### `jarvis telemetry stats`
+### `sunday telemetry stats`
 
 Show aggregated telemetry statistics including total calls, tokens, cost, and latency, broken down by model and engine.
 
 ```bash
-jarvis telemetry stats
-jarvis telemetry stats -n 5    # Show top 5 models
+sunday telemetry stats
+sunday telemetry stats -n 5    # Show top 5 models
 ```
 
 | Option          | Type | Default | Description                   |
 |-----------------|------|---------|-------------------------------|
 | `-n`, `--top`   | int  | `10`    | Number of top models to show  |
 
-### `jarvis telemetry export`
+### `sunday telemetry export`
 
 Export raw telemetry records in JSON or CSV format.
 
 ```bash
-jarvis telemetry export                          # JSON to stdout
-jarvis telemetry export --format csv             # CSV to stdout
-jarvis telemetry export --format json -o data.json  # JSON to file
-jarvis telemetry export -f csv -o metrics.csv    # CSV to file
+sunday telemetry export                          # JSON to stdout
+sunday telemetry export --format csv             # CSV to stdout
+sunday telemetry export --format json -o data.json  # JSON to file
+sunday telemetry export -f csv -o metrics.csv    # CSV to file
 ```
 
 | Option                | Type   | Default  | Description                     |
@@ -316,13 +316,13 @@ jarvis telemetry export -f csv -o metrics.csv    # CSV to file
 | `-f`, `--format`      | choice | `json`   | Output format: `json` or `csv`  |
 | `-o`, `--output`      | path   | stdout   | Output file path                |
 
-### `jarvis telemetry clear`
+### `sunday telemetry clear`
 
 Delete all telemetry records from the database.
 
 ```bash
-jarvis telemetry clear         # Interactive confirmation
-jarvis telemetry clear --yes   # Skip confirmation
+sunday telemetry clear         # Interactive confirmation
+sunday telemetry clear --yes   # Skip confirmation
 ```
 
 | Option         | Type | Default | Description                   |
@@ -334,21 +334,21 @@ jarvis telemetry clear --yes   # Skip confirmation
 
 ---
 
-## `jarvis bench`
+## `sunday bench`
 
 Run inference benchmarks against a running engine.
 
-### `jarvis bench run`
+### `sunday bench run`
 
 Execute benchmarks and report results.
 
 ```bash
-jarvis bench run                               # Run all benchmarks, 10 samples
-jarvis bench run -n 20                         # 20 samples per benchmark
-jarvis bench run -b latency                    # Only the latency benchmark
-jarvis bench run -b throughput -n 50 --json    # Throughput, 50 samples, JSON output
-jarvis bench run -o results.jsonl              # Write JSONL results to file
-jarvis bench run -m qwen3:8b -e ollama         # Specific model and engine
+sunday bench run                               # Run all benchmarks, 10 samples
+sunday bench run -n 20                         # 20 samples per benchmark
+sunday bench run -b latency                    # Only the latency benchmark
+sunday bench run -b throughput -n 50 --json    # Throughput, 50 samples, JSON output
+sunday bench run -o results.jsonl              # Write JSONL results to file
+sunday bench run -m qwen3:8b -e ollama         # Specific model and engine
 ```
 
 | Option                     | Type   | Default | Description                              |
@@ -367,25 +367,25 @@ Available benchmarks:
 
 ---
 
-## `jarvis channel`
+## `sunday channel`
 
 Manage messaging channels for multi-platform communication. Channels connect directly to platform APIs (Telegram, Discord, Slack, etc.) -- no gateway required.
 
-### `jarvis channel list`
+### `sunday channel list`
 
 List registered channel backends and their connection status.
 
 ```bash
-jarvis channel list
+sunday channel list
 ```
 
-### `jarvis channel send`
+### `sunday channel send`
 
 Send a message to a specific channel.
 
 ```bash
-jarvis channel send slack "Hello from Jarvis!"
-jarvis channel send discord "Build complete"
+sunday channel send slack "Hello from Jarvis!"
+sunday channel send discord "Build complete"
 ```
 
 | Argument    | Type   | Description                          |
@@ -393,12 +393,12 @@ jarvis channel send discord "Build complete"
 | `TARGET`    | string | Channel name to send to              |
 | `MESSAGE`   | string | Message content                      |
 
-### `jarvis channel status`
+### `sunday channel status`
 
 Show connection status for configured channels.
 
 ```bash
-jarvis channel status
+sunday channel status
 ```
 
 !!! note "Channel Dependencies"
@@ -406,16 +406,16 @@ jarvis channel status
 
 ---
 
-## `jarvis serve`
+## `sunday serve`
 
 Start an OpenAI-compatible API server.
 
 ```bash
-jarvis serve                                 # Default host/port from config
-jarvis serve --port 8000                     # Custom port
-jarvis serve --host 0.0.0.0 --port 9000      # Bind to all interfaces
-jarvis serve --model qwen3:8b                # Specify default model
-jarvis serve --agent orchestrator            # Route requests through an agent
+sunday serve                                 # Default host/port from config
+sunday serve --port 8000                     # Custom port
+sunday serve --host 0.0.0.0 --port 9000      # Bind to all interfaces
+sunday serve --model qwen3:8b                # Specify default model
+sunday serve --agent orchestrator            # Route requests through an agent
 ```
 
 | Option                   | Type   | Default | Description                              |
@@ -463,98 +463,98 @@ When an agent is configured (e.g., `--agent orchestrator`), non-streaming reques
 
 ---
 
-## `jarvis learning`
+## `sunday learning`
 
 Frontier-driven harness learning (distillation). Manages learning sessions, reviews pending edits, and controls the benchmark gate.
 
-### `jarvis learning init`
+### `sunday learning init`
 
 Initialize the distillation checkpoint repo and directory layout.
 
 ```bash
-jarvis learning init
+sunday learning init
 ```
 
-### `jarvis learning run`
+### `sunday learning run`
 
 Run an on-demand learning session.
 
 ```bash
-jarvis learning run
-jarvis learning run --autonomy auto    # auto-apply all edits
-jarvis learning run --autonomy manual  # dry-run, everything goes to review
+sunday learning run
+sunday learning run --autonomy auto    # auto-apply all edits
+sunday learning run --autonomy manual  # dry-run, everything goes to review
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--autonomy` | `tiered` | `auto`, `tiered`, or `manual` |
 
-### `jarvis learning history`
+### `sunday learning history`
 
 List past learning sessions.
 
 ```bash
-jarvis learning history
-jarvis learning history --limit 5
+sunday learning history
+sunday learning history --limit 5
 ```
 
-### `jarvis learning show`
+### `sunday learning show`
 
 Show details of a learning session (diagnosis, plan, outcomes, cost).
 
 ```bash
-jarvis learning show <session-id>
+sunday learning show <session-id>
 ```
 
-### `jarvis learning review`
+### `sunday learning review`
 
 List all pending edits awaiting approval.
 
 ```bash
-jarvis learning review
+sunday learning review
 ```
 
-### `jarvis learning approve`
+### `sunday learning approve`
 
 Approve a pending edit (still goes through the benchmark gate).
 
 ```bash
-jarvis learning approve <edit-id>
+sunday learning approve <edit-id>
 ```
 
-### `jarvis learning reject`
+### `sunday learning reject`
 
 Reject a pending edit.
 
 ```bash
-jarvis learning reject <edit-id>
-jarvis learning reject <edit-id> --reason "too aggressive"
+sunday learning reject <edit-id>
+sunday learning reject <edit-id> --reason "too aggressive"
 ```
 
-### `jarvis learning rollback`
+### `sunday learning rollback`
 
 Rollback a session's committed edits (creates revert commits).
 
 ```bash
-jarvis learning rollback <session-id>
-jarvis learning rollback --last
+sunday learning rollback <session-id>
+sunday learning rollback --last
 ```
 
-### `jarvis learning benchmark`
+### `sunday learning benchmark`
 
 Personal benchmark management.
 
 ```bash
-jarvis learning benchmark show       # current stats
-jarvis learning benchmark refresh    # manual refresh
+sunday learning benchmark show       # current stats
+sunday learning benchmark refresh    # manual refresh
 ```
 
-### `jarvis learning daemon`
+### `sunday learning daemon`
 
 Background learning daemon.
 
 ```bash
-jarvis learning daemon start
-jarvis learning daemon stop
-jarvis learning daemon status
+sunday learning daemon start
+sunday learning daemon stop
+sunday learning daemon status
 ```

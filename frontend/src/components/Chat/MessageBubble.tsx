@@ -5,14 +5,14 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, Volume2 } from 'lucide-react';
 import { AudioPlayer } from './AudioPlayer';
 import { ToolCallCard } from './ToolCallCard';
 import { XRayFooter } from './XRayFooter';
 import type { ChatMessage } from '../../types';
 
 function stripThinkTags(text: string): string {
-  let cleaned = text.replace(/<think>[\s\S]*?<\/think>\s*/gi, '');
+  let cleaned = text.replace(/ thinking[\s\S]*?<\/think>\s*/gi, '');
   cleaned = cleaned.replace(/^[\s\S]*?<\/think>\s*/i, '');
   return cleaned.trim();
 }
@@ -22,15 +22,9 @@ interface Props {
 }
 
 function getTextContent(node: any): string {
-  if (typeof node === 'string' || typeof node === 'number') {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map(getTextContent).join('');
-  }
-  if (node?.props?.children) {
-    return getTextContent(node.props.children);
-  }
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(getTextContent).join('');
+  if (node?.props?.children) return getTextContent(node.props.children);
   return '';
 }
 
@@ -49,27 +43,30 @@ function CodeBlockPre({ children, ...props }: any) {
   };
 
   return (
-    <div
-      className="code-block-wrapper relative my-3"
-      style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden' }}
-    >
+    <div className="code-block-wrapper relative my-4" style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
       <div
-        className="flex items-center justify-between px-4 py-1.5 text-xs"
-        style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-tertiary)' }}
+        className="flex items-center justify-between px-4 py-2 text-xs"
+        style={{ background: 'var(--color-code-bg)', color: 'var(--color-text-tertiary)' }}
       >
-        <span className="font-mono">{lang || 'code'}</span>
+        <span className="font-mono text-[11px]">{lang || 'code'}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer"
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors cursor-pointer text-xs"
           style={{ color: 'var(--color-text-tertiary)' }}
-          onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--color-text-secondary)')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-tertiary)')}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = 'var(--color-text)';
+            e.currentTarget.style.background = 'var(--color-bg-tertiary)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = 'var(--color-text-tertiary)';
+            e.currentTarget.style.background = 'transparent';
+          }}
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre {...props} style={{ margin: 0, borderRadius: 0 }}>
+      <pre {...props} style={{ margin: 0, borderRadius: 0, background: 'var(--color-code-bg)' }}>
         {children}
       </pre>
     </div>
@@ -88,11 +85,51 @@ function CopyMessageButton({ content }: { content: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+      className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
       style={{ color: 'var(--color-text-tertiary)' }}
       title="Copy message"
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = 'var(--color-text)';
+        e.currentTarget.style.background = 'var(--color-bg-secondary)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = 'var(--color-text-tertiary)';
+        e.currentTarget.style.background = 'transparent';
+      }}
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
+    </button>
+  );
+}
+
+function SpeakMessageButton({ content }: { content: string }) {
+  const supported = typeof window !== 'undefined' && 'speechSynthesis' in window;
+  if (!supported || !content) return null;
+
+  const handleSpeak = () => {
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(content);
+    utterance.lang = navigator.language || 'th-TH';
+    utterance.rate = 1;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  return (
+    <button
+      onClick={handleSpeak}
+      className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+      style={{ color: 'var(--color-text-tertiary)' }}
+      title="Speak message"
+      onMouseEnter={(e) => {
+        e.currentTarget.style.color = 'var(--color-text)';
+        e.currentTarget.style.background = 'var(--color-bg-secondary)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.color = 'var(--color-text-tertiary)';
+        e.currentTarget.style.background = 'transparent';
+      }}
+    >
+      <Volume2 size={14} />
     </button>
   );
 }
@@ -102,13 +139,13 @@ export function MessageBubble({ message }: Props) {
 
   if (isUser) {
     return (
-      <div className="flex justify-end mb-4">
+      <div className="flex justify-end mb-8">
         <div
-          className="max-w-[85%] px-4 py-2.5 text-sm leading-relaxed"
+          className="max-w-[80%] px-5 py-3.5 text-sm leading-relaxed"
           style={{
             background: 'var(--color-user-bubble)',
             color: 'var(--color-user-bubble-text)',
-            borderRadius: 'var(--radius-xl) var(--radius-xl) var(--radius-sm) var(--radius-xl)',
+            borderRadius: '1.25rem',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
           }}
@@ -122,39 +159,36 @@ export function MessageBubble({ message }: Props) {
   const cleanContent = useMemo(() => stripThinkTags(message.content), [message.content]);
 
   return (
-    <div className="group mb-6">
-      {/* Tool calls */}
-      {message.toolCalls && message.toolCalls.length > 0 && (
-        <div className="mb-3 flex flex-col gap-2">
-          {message.toolCalls.map((tc) => (
-            <ToolCallCard key={tc.id} toolCall={tc} />
-          ))}
+    <div className="group mb-8">
+      <div className="flex-1 min-w-0">
+        {message.toolCalls && message.toolCalls.length > 0 && (
+          <div className="mb-4 flex flex-col gap-2">
+            {message.toolCalls.map((tc) => (
+              <ToolCallCard key={tc.id} toolCall={tc} />
+            ))}
+          </div>
+        )}
+
+        {message.audio?.url && <AudioPlayer src={message.audio.url} />}
+
+        {cleanContent && (
+          <div className="prose max-w-none">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkMath]}
+              rehypePlugins={[[rehypeHighlight, { detect: true }], rehypeKatex]}
+              components={{ pre: CodeBlockPre }}
+            >
+              {cleanContent}
+            </ReactMarkdown>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 mt-2">
+          <SpeakMessageButton content={cleanContent} />
+          <CopyMessageButton content={cleanContent} />
         </div>
-      )}
-
-      {/* Audio player (e.g. morning digest) */}
-      {message.audio?.url && <AudioPlayer src={message.audio.url} />}
-
-      {/* Assistant message */}
-      {cleanContent && (
-        <div className="prose max-w-none">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[[rehypeHighlight, { detect: true }], rehypeKatex]}
-            components={{
-              pre: CodeBlockPre,
-            }}
-          >
-            {cleanContent}
-          </ReactMarkdown>
-        </div>
-      )}
-
-      {/* Footer: copy + x-ray */}
-      <div className="flex items-center gap-2 mt-1.5">
-        <CopyMessageButton content={cleanContent} />
+        <XRayFooter usage={message.usage} telemetry={message.telemetry} />
       </div>
-      <XRayFooter usage={message.usage} telemetry={message.telemetry} />
     </div>
   );
 }

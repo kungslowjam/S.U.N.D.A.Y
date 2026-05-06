@@ -9,7 +9,7 @@ This tutorial walks through `examples/deep_research/research.py` — a standalon
 
 !!! tip "Prerequisites"
     - Python 3.10 or later
-    - OpenJarvis installed: run `uv sync --extra dev` from the repository root
+    - SUNDAY installed: run `uv sync --extra dev` from the repository root
     - An inference engine running — either Ollama locally (see below) or a cloud API key in your `.env` file
 
 ## Quick Start
@@ -73,7 +73,7 @@ Each turn the orchestrator decides which tool to call based on what it has learn
 ## The Script
 
 ```python title="examples/deep_research/research.py" hl_lines="9 10 11 12 13"
-from openjarvis import Jarvis
+from sunday import Jarvis
 
 tools = ["web_search", "think", "file_write", "memory_store", "memory_search"]
 
@@ -91,7 +91,7 @@ finally:
     j.close()
 ```
 
-1. Creates a `Jarvis` instance targeting the local Ollama engine with `qwen3:8b`. Both parameters are optional — omitting them uses auto-detected defaults from `~/.openjarvis/config.toml`.
+1. Creates a `Jarvis` instance targeting the local Ollama engine with `qwen3:8b`. Both parameters are optional — omitting them uses auto-detected defaults from `~/.sunday/config.toml`.
 2. Selects the `OrchestratorAgent`, which runs a multi-turn tool-calling loop rather than a single round-trip.
 3. The tool list is passed directly to the agent. All five tools are registered in the tool registry and need no further configuration.
 4. The system prompt instructs the model to cite sources and distinguish facts from emerging claims.
@@ -150,8 +150,8 @@ finally:
 The companion `research.toml` in `examples/deep_research/` expresses the same setup declaratively. You can load it programmatically with `load_recipe()` and pass the result to `SystemBuilder`:
 
 ```python title="Using the recipe"
-from openjarvis.recipes import load_recipe
-from openjarvis import SystemBuilder
+from sunday.recipes import load_recipe
+from sunday import SystemBuilder
 
 recipe = load_recipe("examples/deep_research/research.toml")
 system = SystemBuilder(**recipe.to_builder_kwargs()).build()
@@ -159,7 +159,7 @@ response = system.ask("quantum computing advances 2026")
 system.close()
 ```
 
-This is useful when you want to version-control the research configuration, share it with collaborators, or feed it to the `jarvis eval` runner for benchmarking.
+This is useful when you want to version-control the research configuration, share it with collaborators, or feed it to the `sunday eval` runner for benchmarking.
 
 ## Customization
 
@@ -180,7 +180,7 @@ tools = ["web_search", "think", "file_write",
          "memory_store", "memory_search", "knowledge_graph_query"]
 ```
 
-Run `jarvis agent info orchestrator` to see the full tool catalog.
+Run `sunday agent info orchestrator` to see the full tool catalog.
 
 ### Adjust temperature
 
@@ -194,4 +194,4 @@ python examples/deep_research/research.py "your topic" --max-turns 20
 
 - [Architecture: Agents](../architecture/agents.md) — agent hierarchy (`BaseAgent`, `ToolUsingAgent`, `OrchestratorAgent`) and the `accepts_tools` mechanism
 - [Architecture: Tools and Memory](../architecture/memory.md) — tool registry, MCP adapter, and the `ToolExecutor` dispatch pipeline
-- [Getting Started: Configuration](../getting-started/configuration.md) — how to configure engines and models in `~/.openjarvis/config.toml`
+- [Getting Started: Configuration](../getting-started/configuration.md) — how to configure engines and models in `~/.sunday/config.toml`

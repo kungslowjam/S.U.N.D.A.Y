@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Send, Square, Paperclip } from 'lucide-react';
+import { ArrowUp, Square } from 'lucide-react';
 import { useAppStore, generateId } from '../../lib/store';
 import { streamChat } from '../../lib/sse';
 import { fetchSavings, getBase } from '../../lib/api';
@@ -29,16 +29,11 @@ export function InputArea() {
 
   const { state: speechState, available: speechAvailable, startRecording, stopRecording } = useSpeech();
 
-  // Abort in-flight stream when the user switches models mid-generation.
-  // This prevents errors from trying to continue a stream with a stale model.
   const prevModelRef = useRef(selectedModel);
   useEffect(() => {
     if (prevModelRef.current !== selectedModel && streamState.isStreaming) {
       abortRef.current?.abort();
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       resetStream();
       abortRef.current = null;
     }
@@ -56,12 +51,8 @@ export function InputArea() {
     if (speechState === 'recording') {
       try {
         const text = await stopRecording();
-        if (text) {
-          setInput((prev) => (prev ? prev + ' ' + text : text));
-        }
-      } catch {
-        // Error is captured in useSpeech
-      }
+        if (text) setInput((prev) => (prev ? prev + ' ' + text : text));
+      } catch {}
     } else {
       await startRecording();
     }
@@ -76,10 +67,7 @@ export function InputArea() {
 
   const stopStreaming = useCallback(() => {
     abortRef.current?.abort();
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     resetStream();
   }, [resetStream]);
 
@@ -90,38 +78,19 @@ export function InputArea() {
     setInput('');
 
     let convId = activeId;
-    if (!convId) {
-      convId = createConversation(selectedModel);
-    }
+    if (!convId) convId = createConversation(selectedModel);
 
-    const userMsg: ChatMessage = {
-      id: generateId(),
-      role: 'user',
-      content,
-      timestamp: Date.now(),
-    };
+    const userMsg: ChatMessage = { id: generateId(), role: 'user', content, timestamp: Date.now() };
     addMessage(convId, userMsg);
 
-    // Build API messages before adding assistant placeholder
     const currentMessages = useAppStore.getState().messages;
-    const apiMessages = currentMessages.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const apiMessages = currentMessages.map((m) => ({ role: m.role, content: m.content }));
 
-    const assistantMsg: ChatMessage = {
-      id: generateId(),
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-    };
+    const assistantMsg: ChatMessage = { id: generateId(), role: 'assistant', content: '', timestamp: Date.now() };
     addMessage(convId, assistantMsg);
 
-    // Start streaming
     const startTime = Date.now();
-    const timer = setInterval(() => {
-      setStreamState({ elapsedMs: Date.now() - startTime });
-    }, 100);
+    const timer = setInterval(() => { setStreamState({ elapsedMs: Date.now() - startTime }); }, 100);
     timerRef.current = timer;
 
     const controller = new AbortController();
@@ -134,17 +103,9 @@ export function InputArea() {
     let lastFlush = 0;
     let ttftMs: number | undefined;
 
-    setStreamState({
-      isStreaming: true,
-      phase: 'Generating...',
-      elapsedMs: 0,
-      activeToolCalls: [],
-      content: '',
-    });
+    setStreamState({ isStreaming: true, phase: 'Generating...', elapsedMs: 0, activeToolCalls: [], content: '' });
     useAppStore.getState().addLogEntry({
-      timestamp: Date.now(),
-      level: 'info',
-      category: 'chat',
+      timestamp: Date.now(), level: 'info', category: 'chat',
       message: `Request: "${content.slice(0, 80)}${content.length > 80 ? '...' : ''}" → ${selectedModel}`,
     });
 
@@ -159,45 +120,20 @@ export function InputArea() {
           setStreamState({ phase: 'Agent thinking...' });
         } else if (eventName === 'inference_start') {
           setStreamState({ phase: 'Generating...' });
-          useAppStore.getState().addLogEntry({
-            timestamp: Date.now(), level: 'info', category: 'chat',
-            message: `Generating with ${selectedModel}...`,
-          });
         } else if (eventName === 'tool_call_start') {
           try {
             const data = JSON.parse(sseEvent.data);
-            const tc: ToolCallInfo = {
-              id: generateId(),
-              tool: data.tool,
-              arguments: data.arguments || '',
-              status: 'running',
-            };
+            const tc: ToolCallInfo = { id: generateId(), tool: data.tool, arguments: data.arguments || '', status: 'running' };
             toolCalls.push(tc);
-            setStreamState({
-              phase: `Calling ${data.tool}...`,
-              activeToolCalls: [...toolCalls],
-            });
+            setStreamState({ phase: `Calling ${data.tool}...`, activeToolCalls: [...toolCalls] });
             updateLastAssistant(convId, accumulatedContent, [...toolCalls]);
-            useAppStore.getState().addLogEntry({
-              timestamp: Date.now(), level: 'info', category: 'tool',
-              message: `Calling ${data.tool}(${data.arguments || ''})`,
-            });
           } catch {}
         } else if (eventName === 'tool_call_end') {
           try {
             const data = JSON.parse(sseEvent.data);
-            const tc = toolCalls.find(
-              (t) => t.tool === data.tool && t.status === 'running',
-            );
-            if (tc) {
-              tc.status = data.success ? 'success' : 'error';
-              tc.latency = data.latency;
-              tc.result = data.result;
-            }
-            setStreamState({
-              phase: 'Generating...',
-              activeToolCalls: [...toolCalls],
-            });
+            const tc = toolCalls.find((t) => t.tool === data.tool && t.status === 'running');
+            if (tc) { tc.status = data.success ? 'success' : 'error'; tc.latency = data.latency; tc.result = data.result; }
+            setStreamState({ phase: 'Generating...', activeToolCalls: [...toolCalls] });
             updateLastAssistant(convId, accumulatedContent, [...toolCalls]);
           } catch {}
         } else {
@@ -210,14 +146,9 @@ export function InputArea() {
               if (!ttftMs) ttftMs = Date.now() - startTime;
               accumulatedContent += delta.content;
               setStreamState({ content: accumulatedContent, phase: '' });
-
               const now = Date.now();
               if (now - lastFlush >= 80) {
-                updateLastAssistant(
-                  convId,
-                  accumulatedContent,
-                  toolCalls.length > 0 ? [...toolCalls] : undefined,
-                );
+                updateLastAssistant(convId, accumulatedContent, toolCalls.length > 0 ? [...toolCalls] : undefined);
                 lastFlush = now;
               }
             }
@@ -227,84 +158,32 @@ export function InputArea() {
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
-        // User cancelled or model switch — keep whatever was accumulated
         if (!accumulatedContent) accumulatedContent = '(Generation stopped)';
       } else {
-        const errMsg = err?.message || String(err);
-        accumulatedContent =
-          accumulatedContent || `Error: ${errMsg}`;
-        useAppStore.getState().addLogEntry({
-          timestamp: Date.now(), level: 'error', category: 'chat',
-          message: `Stream error: ${errMsg}`,
-        });
+        accumulatedContent = accumulatedContent || `Error: ${err?.message || String(err)}`;
       }
     } finally {
-      if (!accumulatedContent) {
-        accumulatedContent = 'No response was generated. Please try again.';
-      }
+      if (!accumulatedContent) accumulatedContent = 'No response was generated. Please try again.';
       const totalMs = Date.now() - startTime;
       const _CLOUD_PREFIXES = ['gpt-', 'o1-', 'o3-', 'o4-', 'claude-', 'gemini-', 'openrouter/', 'MiniMax-', 'chatgpt-'];
       const engineLabel = _CLOUD_PREFIXES.some(p => selectedModel.startsWith(p)) ? 'cloud' : 'ollama';
       const telemetry: MessageTelemetry = {
-        engine: engineLabel,
-        model_id: selectedModel,
-        total_ms: totalMs,
-        ttft_ms: ttftMs,
-        tokens_per_sec: usage?.completion_tokens
-          ? usage.completion_tokens / (totalMs / 1000)
-          : undefined,
-        complexity_score: complexity?.score,
-        complexity_tier: complexity?.tier,
-        suggested_max_tokens: complexity?.suggested_max_tokens,
+        engine: engineLabel, model_id: selectedModel, total_ms: totalMs, ttft_ms: ttftMs,
+        tokens_per_sec: usage?.completion_tokens ? usage.completion_tokens / (totalMs / 1000) : undefined,
+        complexity_score: complexity?.score, complexity_tier: complexity?.tier, suggested_max_tokens: complexity?.suggested_max_tokens,
       };
-      // Check if the response has digest audio available
       let audioMeta: { url: string } | undefined;
       try {
         const digestRes = await fetch(`${getBase()}/api/digest`);
-        if (digestRes.ok) {
-          const digest = await digestRes.json();
-          if (digest.audio_available) {
-            audioMeta = { url: `${getBase()}/api/digest/audio` };
-          }
-        }
-      } catch {
-        // Not a digest response or server unavailable — skip
-      }
-
-      updateLastAssistant(
-        convId,
-        accumulatedContent,
-        toolCalls.length > 0 ? toolCalls : undefined,
-        usage,
-        telemetry,
-        audioMeta,
-      );
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+        if (digestRes.ok) { const digest = await digestRes.json(); if (digest.audio_available) audioMeta = { url: `${getBase()}/api/digest/audio` }; }
+      } catch {}
+      updateLastAssistant(convId, accumulatedContent, toolCalls.length > 0 ? toolCalls : undefined, usage, telemetry, audioMeta);
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
       resetStream();
-      useAppStore.getState().addLogEntry({
-        timestamp: Date.now(), level: 'info', category: 'chat',
-        message: `Response: ${accumulatedContent.length} chars`,
-      });
       abortRef.current = null;
-
-      fetchSavings()
-        .then((data) => useAppStore.getState().setSavings(data))
-        .catch(() => {});
+      fetchSavings().then((data) => useAppStore.getState().setSavings(data)).catch(() => {});
     }
-  }, [
-    input,
-    activeId,
-    selectedModel,
-    streamState.isStreaming,
-    createConversation,
-    addMessage,
-    updateLastAssistant,
-    setStreamState,
-    resetStream,
-  ]);
+  }, [input, activeId, selectedModel, streamState.isStreaming, createConversation, addMessage, updateLastAssistant, setStreamState, resetStream]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -313,64 +192,71 @@ export function InputArea() {
     }
   };
 
+  const canSend = input.trim().length > 0 && !modelLoading;
+
   return (
-    <div className="px-4 pb-4 pt-2" style={{ maxWidth: 'var(--chat-max-width)', margin: '0 auto', width: '100%' }}>
-      <div
-        className="flex items-center gap-2 rounded-2xl px-4 py-3 transition-shadow"
-        style={{
-          background: 'var(--color-input-bg)',
-          border: '1px solid var(--color-input-border)',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Message OpenJarvis..."
-          rows={1}
-          className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed"
-          style={{ color: 'var(--color-text)', maxHeight: '200px' }}
-          disabled={streamState.isStreaming || modelLoading}
-        />
-        {streamState.isStreaming ? (
-          <button
-            onClick={stopStreaming}
-            className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer"
-            style={{ background: 'var(--color-error)', color: 'var(--color-on-accent)' }}
-            title="Stop generating"
+    <div className="w-full shrink-0" style={{ background: 'var(--color-bg)' }}>
+      <div className="max-w-[var(--chat-max-width)] mx-auto px-4 pb-4">
+        <div className="relative">
+          <div
+            className="flex items-end gap-2 rounded-2xl px-4 py-3 transition-shadow"
+            style={{
+              background: 'var(--color-input-bg)',
+              border: '1px solid var(--color-input-border)',
+              boxShadow: 'var(--shadow-chat)',
+            }}
           >
-            <Square size={16} />
-          </button>
-        ) : (
-          <div className="flex items-center gap-1">
-            <MicButton
-              state={speechState}
-              onClick={handleMicClick}
-              disabled={micDisabled}
-              reason={micReason}
-            />
-            <button
-              onClick={sendMessage}
-              disabled={!input.trim() || modelLoading}
-              className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-default"
-              style={{
-                background: input.trim() ? 'var(--color-accent)' : 'var(--color-bg-tertiary)',
-                color: input.trim() ? 'white' : 'var(--color-text-tertiary)',
-              }}
-              title="Send message"
-            >
-              <Send size={16} />
-            </button>
+            <div className="flex-1 flex items-end gap-2">
+              <MicButton
+                state={speechState}
+                onClick={handleMicClick}
+                disabled={micDisabled}
+                reason={micReason}
+              />
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Message SUNDAY..."
+                rows={1}
+                className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed placeholder:text-[var(--color-text-tertiary)]"
+                style={{ color: 'var(--color-text)', maxHeight: '200px' }}
+                disabled={streamState.isStreaming || modelLoading}
+              />
+            </div>
+            {streamState.isStreaming ? (
+              <button
+                onClick={stopStreaming}
+                className="p-2 rounded-xl transition-all shrink-0 cursor-pointer"
+                style={{ background: 'var(--color-text)', color: 'var(--color-bg)' }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
+                title="Stop generating"
+              >
+                <Square size={14} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                onClick={sendMessage}
+                disabled={!canSend}
+                className="p-2 rounded-xl transition-all shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                style={{
+                  background: canSend ? 'var(--color-text)' : 'var(--color-bg-tertiary)',
+                  color: canSend ? 'var(--color-bg)' : 'var(--color-text-tertiary)',
+                }}
+                onMouseEnter={(e) => { if (canSend) e.currentTarget.style.opacity = '0.85'; }}
+                onMouseLeave={(e) => { if (canSend) e.currentTarget.style.opacity = '1'; }}
+                title="Send message"
+              >
+                <ArrowUp size={16} />
+              </button>
+            )}
           </div>
-        )}
-      </div>
-      <div className="flex items-center justify-center mt-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
-        <span>
-          <kbd className="font-mono">Enter</kbd> to send &middot;{' '}
-          <kbd className="font-mono">Shift+Enter</kbd> for new line
-        </span>
+        </div>
+        <p className="text-center text-[11px] mt-3" style={{ color: 'var(--color-text-tertiary)' }}>
+          SUNDAY runs locally. Your data stays private.
+        </p>
       </div>
     </div>
   );
