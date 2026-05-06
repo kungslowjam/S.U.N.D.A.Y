@@ -952,6 +952,8 @@ export interface AvailableSkill {
   source: string;
   category: string;
   description: string;
+  catalog_only?: boolean;
+  url?: string;
 }
 
 export interface SkillSource {

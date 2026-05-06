@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 from pathlib import Path
 from typing import List
@@ -19,7 +20,7 @@ from sunday.skills.sources.base import ResolvedSkill, SourceResolver
 
 LOGGER = logging.getLogger(__name__)
 
-OPENCLAW_REPO_URL = "https://github.com/openclaw/skills.git"
+OPENCLAW_REPO_URL = "https://github.com/VoltAgent/awesome-openclaw-skills.git"
 
 
 class OpenClawResolver(SourceResolver):
@@ -31,6 +32,7 @@ class OpenClawResolver(SourceResolver):
         if cache_root is None:
             cache_root = Path("~/.sunday/skill-cache/openclaw/").expanduser()
         self._cache_root = Path(cache_root)
+        self._repo_url = OPENCLAW_REPO_URL
 
     def cache_dir(self) -> Path:
         return self._cache_root
@@ -44,14 +46,14 @@ class OpenClawResolver(SourceResolver):
         else:
             self._cache_root.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(
-                ["git", "clone", OPENCLAW_REPO_URL, str(self._cache_root)],
+                ["git", "clone", "--depth", "1", self._repo_url, str(self._cache_root)],
                 check=True,
             )
 
     def list_skills(self) -> List[ResolvedSkill]:
         skills_root = self._cache_root / "skills"
         if not skills_root.exists():
-            return []
+            return self._list_from_readme()
 
         results: List[ResolvedSkill] = []
         commit = self._read_commit()
@@ -83,6 +85,87 @@ class OpenClawResolver(SourceResolver):
                 )
 
         return results
+
+    def _list_from_readme(self) -> List[ResolvedSkill]:
+        """Parse curated awesome-list markdown when SKILL.md files are absent."""
+        catalog_files = [self._cache_root / "README.md"]
+        categories_root = self._cache_root / "categories"
+        if categories_root.exists():
+            catalog_files.extend(sorted(categories_root.glob("*.md")))
+        catalog_files = [p for p in catalog_files if p.exists()]
+        if not catalog_files:
+            return []
+
+        results: List[ResolvedSkill] = []
+        commit = self._read_commit()
+        seen: set[str] = set()
+
+        for catalog_file in catalog_files:
+            try:
+                raw = catalog_file.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            category = self._category_from_catalog_file(catalog_file)
+            for line in raw.splitlines():
+                parsed = self._parse_catalog_line(line, category, catalog_file, commit)
+                if parsed is None or parsed.name in seen:
+                    continue
+                seen.add(parsed.name)
+                results.append(parsed)
+
+        return results
+
+    def _parse_catalog_line(
+        self,
+        line: str,
+        category: str,
+        catalog_file: Path,
+        commit: str,
+    ) -> ResolvedSkill | None:
+        stripped = line.strip()
+        detail_match = re.match(r"<summary><h3[^>]*>(.*?)</h3></summary>", stripped)
+        if detail_match:
+            category = detail_match.group(1).strip()
+
+        bullet_match = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)\s*-\s*(.*)", stripped)
+        if not bullet_match:
+            return None
+
+        name = self._clean_markdown_cell(bullet_match.group(1))
+        if not name:
+            return None
+
+        url = bullet_match.group(2).strip()
+        description = self._clean_markdown_cell(bullet_match.group(3))
+        return ResolvedSkill(
+            name=name,
+            source=self.name,
+            path=catalog_file,
+            category=category,
+            description=description,
+            commit=commit,
+            sidecar_data={"catalog_only": True, "url": url},
+        )
+
+    def _clean_markdown_cell(self, value: str) -> str:
+        value = value.replace("`", "").strip()
+        if "](" in value and value.startswith("["):
+            label_end = value.find("]")
+            if label_end > 1:
+                value = value[1:label_end]
+        return value.strip()
+
+    def _category_from_catalog_file(self, catalog_file: Path) -> str:
+        if catalog_file.name == "README.md":
+            return ""
+        try:
+            raw = catalog_file.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+        for line in raw.splitlines():
+            if line.startswith("# "):
+                return self._clean_markdown_cell(line.lstrip("#").strip())
+        return catalog_file.stem.replace("-", " ").title()
 
     def _read_preview(self, skill_md: Path, default_name: str) -> tuple[str, str]:
         try:

@@ -100,6 +100,11 @@ source = "hermes"
 url = "https://github.com/NousResearch/hermes-agent.git"
 auto_update = true
 
+[[skills.sources]]
+source = "openclaw"
+url = "https://github.com/VoltAgent/awesome-openclaw-skills.git"
+auto_update = true
+
 [server]
 host = "0.0.0.0"
 port = 8000

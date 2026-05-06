@@ -84,6 +84,10 @@ export function SkillsPage() {
   }, [showInstall, selectedSource, searchQuery]);
 
   const handleInstall = async (skill: AvailableSkill) => {
+    if (skill.catalog_only) {
+      if (skill.url) window.open(skill.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
     setInstalling(skill.name);
     try {
       await installSkill(skill.source, skill.name);
@@ -260,6 +264,7 @@ export function SkillsPage() {
                         <div className="text-xs mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
                           <span className="px-1.5 py-0.5 rounded" style={{ background: 'var(--color-accent)', color: 'white' }}>{skill.source}</span>
                           {' / '}{skill.category}
+                          {skill.catalog_only && ' / catalog'}
                           {skill.description && ` — ${skill.description}`}
                         </div>
                       </div>
@@ -269,7 +274,7 @@ export function SkillsPage() {
                         className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
                         style={{ background: 'var(--color-accent)', color: 'white' }}
                       >
-                        {installing === skill.name ? 'Installing...' : <><Plus size={12} /> Install</>}
+                        {skill.catalog_only ? 'Open' : installing === skill.name ? 'Installing...' : <><Plus size={12} /> Install</>}
                       </button>
                     </div>
                   ))}

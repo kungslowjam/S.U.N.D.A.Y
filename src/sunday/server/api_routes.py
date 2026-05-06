@@ -416,7 +416,12 @@ def _default_skill_sources():
             source="hermes",
             url="https://github.com/NousResearch/hermes-agent.git",
             auto_update=True,
-        )
+        ),
+        SkillSourceConfig(
+            source="openclaw",
+            url="https://github.com/VoltAgent/awesome-openclaw-skills.git",
+            auto_update=True,
+        ),
     ]
 
 
@@ -633,6 +638,8 @@ async def list_available_skills(
                     "source": src_cfg.source,
                     "category": s.category,
                     "description": s.description[:200] if s.description else "",
+                    "catalog_only": bool(s.sidecar_data.get("catalog_only")),
+                    "url": s.sidecar_data.get("url", ""),
                 })
 
         return {"skills": skills}
