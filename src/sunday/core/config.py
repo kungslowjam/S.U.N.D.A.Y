@@ -1553,6 +1553,24 @@ def _migrate_toml_data(data: Dict[str, Any], cfg: "JarvisConfig") -> None:
                 )
 
 
+def _coerce_skill_sources(cfg: "JarvisConfig") -> None:
+    """Normalize skill source TOML dicts into SkillSourceConfig objects."""
+    normalized: List[SkillSourceConfig] = []
+    for item in cfg.skills.sources:
+        if isinstance(item, SkillSourceConfig):
+            normalized.append(item)
+        elif isinstance(item, dict):
+            normalized.append(
+                SkillSourceConfig(
+                    source=str(item.get("source", "")),
+                    url=str(item.get("url", "")),
+                    filter=dict(item.get("filter") or {}),
+                    auto_update=bool(item.get("auto_update", False)),
+                )
+            )
+    cfg.skills.sources = [s for s in normalized if s.source]
+
+
 def _parse_mining_section(data: dict) -> Optional["MiningConfig"]:
     """Parse the ``[mining]`` TOML section into a ``MiningConfig``.
 
@@ -1645,6 +1663,7 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
             "optimize",
             "agent_manager",
             "digest",
+            "skills",
         )
         for section_name in top_sections:
             if section_name in data:
@@ -1652,6 +1671,8 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
                     getattr(cfg, section_name),
                     data[section_name],
                 )
+
+        _coerce_skill_sources(cfg)
 
         # Memory: accept [memory] (old) → maps to tools.storage
         if "memory" in data:

@@ -408,6 +408,25 @@ async def telemetry_energy(request: Request):
 skills_router = APIRouter(prefix="/v1/skills", tags=["skills"])
 
 
+def _default_skill_sources():
+    from sunday.core.config import SkillSourceConfig
+
+    return [
+        SkillSourceConfig(
+            source="hermes",
+            url="https://github.com/NousResearch/hermes-agent.git",
+            auto_update=True,
+        )
+    ]
+
+
+def _configured_skill_sources():
+    from sunday.core.config import load_config
+
+    cfg = load_config()
+    return list(cfg.skills.sources) or _default_skill_sources()
+
+
 @skills_router.get("")
 async def list_skills(request: Request):
     """List installed skills with details."""
@@ -539,10 +558,8 @@ async def remove_skill(skill_name: str, request: Request):
 async def list_sources(request: Request):
     """List configured skill sources."""
     try:
-        from sunday.core.config import load_config
-        cfg = load_config()
         sources = []
-        for s in cfg.skills.sources:
+        for s in _configured_skill_sources():
             sources.append({
                 "source": s.source,
                 "url": s.url,
@@ -566,17 +583,15 @@ async def list_available_skills(
     try:
         from pathlib import Path
 
-        from sunday.core.config import load_config
         from sunday.skills.sources.github import GitHubResolver
         from sunday.skills.sources.hermes import HermesResolver
         from sunday.skills.sources.openclaw import OpenClawResolver
 
-        cfg = load_config()
         skills = []
 
         sources_to_search = []
         if source:
-            for s in cfg.skills.sources:
+            for s in _configured_skill_sources():
                 if s.source == source:
                     sources_to_search.append(s)
                     break
@@ -586,7 +601,7 @@ async def list_available_skills(
                     detail=f"Source '{source}' not configured",
                 )
         else:
-            sources_to_search = list(cfg.skills.sources)
+            sources_to_search = _configured_skill_sources()
 
         for src_cfg in sources_to_search:
             if src_cfg.source == "hermes":
@@ -639,7 +654,6 @@ async def sync_skills(
     try:
         from pathlib import Path
 
-        from sunday.core.config import load_config
         from sunday.skills.importer import SkillImporter
         from sunday.skills.parser import SkillParser
         from sunday.skills.sources.github import GitHubResolver
@@ -647,10 +661,9 @@ async def sync_skills(
         from sunday.skills.sources.openclaw import OpenClawResolver
         from sunday.skills.tool_translator import ToolTranslator
 
-        cfg = load_config()
         source_configs = []
         if source:
-            for s in cfg.skills.sources:
+            for s in _configured_skill_sources():
                 if s.source == source:
                     source_configs.append(s)
                     break
@@ -660,7 +673,7 @@ async def sync_skills(
                     detail=f"Source '{source}' not configured",
                 )
         else:
-            source_configs = list(cfg.skills.sources)
+            source_configs = _configured_skill_sources()
 
         if not source_configs:
             return {"installed": 0, "skipped": 0}
