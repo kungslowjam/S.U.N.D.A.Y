@@ -3,6 +3,7 @@
 $ErrorActionPreference = "Stop"
 
 $LabRoot = $PSScriptRoot
+$RepoDir = Join-Path $LabRoot "llama.cpp-omni"
 $ModelPath = Join-Path $LabRoot "models\MiniCPM-o-4_5-gguf\MiniCPM-o-4_5-Q4_K_M.gguf"
 $Candidates = @(
     (Join-Path $LabRoot "llama.cpp-omni\build\bin\Release\llama-omni-cli.exe"),
@@ -20,4 +21,10 @@ if (-not (Test-Path $ModelPath)) {
 }
 
 Write-Host "[RUN] Text-only omni test" -ForegroundColor Cyan
-& $Exe -m $ModelPath --no-tts -ngl 35 -c 2048
+Write-Host "Note: this CLI runs the built-in audio test case; it is not an interactive text chat." -ForegroundColor Yellow
+Push-Location $RepoDir
+try {
+    & $Exe -m $ModelPath --no-tts -ngl 35 -c 2048
+} finally {
+    Pop-Location
+}

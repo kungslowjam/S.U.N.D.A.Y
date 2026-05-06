@@ -3,6 +3,7 @@
 $ErrorActionPreference = "Stop"
 
 $LabRoot = $PSScriptRoot
+$RepoDir = Join-Path $LabRoot "llama.cpp-omni"
 $ModelDir = Join-Path $LabRoot "models\MiniCPM-o-4_5-gguf"
 $ModelPath = Join-Path $ModelDir "MiniCPM-o-4_5-Q4_K_M.gguf"
 $OutputDir = Join-Path $LabRoot "output"
@@ -25,4 +26,10 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
 Write-Host "[RUN] Full omni test" -ForegroundColor Cyan
 Write-Host "Note: full Q4_K_M omni is documented around 9GB VRAM; RTX 4050 6GB may be slow or fail." -ForegroundColor Yellow
-& $Exe -m $ModelPath -ngl 35 -c 2048
+Write-Host "Note: this CLI runs the built-in audio test case; it is not an interactive text chat." -ForegroundColor Yellow
+Push-Location $RepoDir
+try {
+    & $Exe -m $ModelPath -ngl 35 -c 2048
+} finally {
+    Pop-Location
+}
