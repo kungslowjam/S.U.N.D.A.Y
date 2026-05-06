@@ -26,7 +26,7 @@ Write-Host "[RUN] Text-only omni test" -ForegroundColor Cyan
 Write-Host "Note: this CLI runs the built-in audio test case; it is not an interactive text chat." -ForegroundColor Yellow
 Push-Location $RepoDir
 try {
-    & $Exe -m $ModelPath --no-tts -ngl 35 -c 2048
+    & $Exe -m $ModelPath --no-tts --lang en -ngl 35 -c 2048
 } finally {
     Pop-Location
 }

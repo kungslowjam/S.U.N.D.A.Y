@@ -79,6 +79,65 @@ static void usleep(uint64_t usec) {
     $Text.Replace($Needle, $Replacement) | Set-Content -LiteralPath $OmniCli -NoNewline
 }
 
+function Patch-LanguageOption {
+    $OmniHeader = Join-Path $RepoDir "tools\omni\omni.h"
+    if (Test-Path $OmniHeader) {
+        $HeaderText = Get-Content -LiteralPath $OmniHeader -Raw
+        if ($HeaderText -notmatch "void omni_set_language\(struct omni_context \* ctx_omni") {
+            $HeaderNeedle = "bool stop_speek(struct omni_context * ctx_omni);"
+            $HeaderReplacement = "void omni_set_language(struct omni_context * ctx_omni, const std::string & lang);`r`n`r`n$HeaderNeedle"
+            if (-not $HeaderText.Contains($HeaderNeedle)) {
+                throw "Could not patch omni_set_language declaration in $OmniHeader."
+            }
+            Write-Host "[PATCH] Adding omni_set_language declaration" -ForegroundColor Cyan
+            $HeaderText.Replace($HeaderNeedle, $HeaderReplacement) | Set-Content -LiteralPath $OmniHeader -NoNewline
+        }
+    }
+
+    $OmniCli = Join-Path $RepoDir "tools\omni\omni-cli.cpp"
+    if (-not (Test-Path $OmniCli)) {
+        return
+    }
+
+    $Text = Get-Content -LiteralPath $OmniCli -Raw
+    if ($Text -match "--lang <en\|zh>") {
+        return
+    }
+
+    Write-Host "[PATCH] Adding CLI language option" -ForegroundColor Cyan
+    $Replacements = @(
+        @{
+            Old = "        `"  --omni              Enable omni mode (audio + vision, media_type=2)\n`""
+            New = "        `"  --omni              Enable omni mode (audio + vision, media_type=2)\n`"`r`n        `"  --lang <en|zh>      Response language (default: en)\n`""
+        },
+        @{
+            Old = "    bool run_test = false;`r`n    std::string test_audio_prefix;"
+            New = "    bool run_test = false;`r`n    std::string language = `"en`";`r`n    std::string test_audio_prefix;"
+        },
+        @{
+            Old = "        else if (arg == `"--omni`") {`r`n            media_type = 2;`r`n        }"
+            New = "        else if (arg == `"--omni`") {`r`n            media_type = 2;`r`n        }`r`n        else if (arg == `"--lang`" && i + 1 < argc) {`r`n            language = argv[++i];`r`n            if (language != `"en`" && language != `"zh`") {`r`n                fprintf(stderr, `"Error: --lang must be 'en' or 'zh', got '%s'\n`", language.c_str());`r`n                return 1;`r`n            }`r`n        }"
+        },
+        @{
+            Old = "    printf(`"  GPU layers: %d\n`", n_gpu_layers);"
+            New = "    printf(`"  GPU layers: %d\n`", n_gpu_layers);`r`n    printf(`"  Language: %s\n`", language.c_str());"
+        },
+        @{
+            Old = "    ctx_omni->async = true;`r`n    ctx_omni->ref_audio_path = ref_audio_path;  // 设置参考音频路径"
+            New = "    ctx_omni->async = true;`r`n    ctx_omni->ref_audio_path = ref_audio_path;  // 设置参考音频路径`r`n    omni_set_language(ctx_omni, language);"
+        }
+    )
+
+    foreach ($Replacement in $Replacements) {
+        if (-not $Text.Contains($Replacement.Old)) {
+            throw "Could not patch language option in $OmniCli."
+        }
+        $Text = $Text.Replace($Replacement.Old, $Replacement.New)
+    }
+
+    $Text | Set-Content -LiteralPath $OmniCli -NoNewline
+}
+
 Import-VsDevEnvironment
 
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
@@ -90,6 +149,7 @@ if ($Cuda -and -not (Get-Command nvcc.exe -ErrorAction SilentlyContinue)) {
 }
 
 Patch-WindowsCompatibility
+Patch-LanguageOption
 
 if (Test-Path (Join-Path $BuildDir "CMakeCache.txt")) {
     Write-Host "[CLEAN] Removing failed CMake cache" -ForegroundColor Yellow

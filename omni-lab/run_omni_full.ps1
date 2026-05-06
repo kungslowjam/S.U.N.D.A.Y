@@ -31,7 +31,7 @@ Write-Host "Note: full Q4_K_M omni is documented around 9GB VRAM; RTX 4050 6GB m
 Write-Host "Note: this CLI runs the built-in audio test case; it is not an interactive text chat." -ForegroundColor Yellow
 Push-Location $RepoDir
 try {
-    & $Exe -m $ModelPath -ngl 35 -c 2048
+    & $Exe -m $ModelPath --lang en -ngl 35 -c 2048
 } finally {
     Pop-Location
 }
