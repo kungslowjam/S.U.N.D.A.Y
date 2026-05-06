@@ -13,6 +13,7 @@ omni-lab/
 ├── build_omni.ps1
 ├── run_omni_text_only.ps1
 ├── run_omni_full.ps1
+├── open_omni_output.ps1
 └── cleanup_omni_lab.ps1
 ```
 
@@ -42,6 +43,12 @@ If CMake cannot find a compiler, run the command from **Developer PowerShell for
 
 ```powershell
 .\omni-lab\run_omni_full.ps1
+```
+
+5. Open the latest generated audio output:
+
+```powershell
+.\omni-lab\open_omni_output.ps1
 ```
 
 ## Cleanup
