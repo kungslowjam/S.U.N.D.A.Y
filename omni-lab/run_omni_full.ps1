@@ -8,6 +8,8 @@ $ModelDir = Join-Path $LabRoot "models\MiniCPM-o-4_5-gguf"
 $ModelPath = Join-Path $ModelDir "MiniCPM-o-4_5-Q4_K_M.gguf"
 $OutputDir = Join-Path $LabRoot "output"
 $Candidates = @(
+    (Join-Path $LabRoot "llama.cpp-omni\build-cuda\bin\Release\llama-omni-cli.exe"),
+    (Join-Path $LabRoot "llama.cpp-omni\build-cuda\bin\llama-omni-cli.exe"),
     (Join-Path $LabRoot "llama.cpp-omni\build\bin\Release\llama-omni-cli.exe"),
     (Join-Path $LabRoot "llama.cpp-omni\build\bin\llama-omni-cli.exe"),
     (Join-Path $LabRoot "llama.cpp-omni\build\examples\omni\Release\llama-omni-cli.exe"),

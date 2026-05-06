@@ -1,10 +1,15 @@
+param(
+    [switch] $Cuda
+)
+
 # Build llama.cpp-omni in the isolated omni-lab folder.
 
 $ErrorActionPreference = "Stop"
 
 $LabRoot = $PSScriptRoot
 $RepoDir = Join-Path $LabRoot "llama.cpp-omni"
-$BuildDir = Join-Path $RepoDir "build"
+$BuildDirName = if ($Cuda) { "build-cuda" } else { "build" }
+$BuildDir = Join-Path $RepoDir $BuildDirName
 
 if (-not (Test-Path $RepoDir)) {
     throw "Missing runtime repo. Run .\omni-lab\setup_omni_lab.ps1 first."
@@ -80,6 +85,10 @@ if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
     throw "MSVC compiler cl.exe not found. Install Visual Studio Build Tools with C++ build tools, or run this from Developer PowerShell for Visual Studio."
 }
 
+if ($Cuda -and -not (Get-Command nvcc.exe -ErrorAction SilentlyContinue)) {
+    throw "CUDA build requested, but nvcc.exe was not found. Install NVIDIA CUDA Toolkit or run without -Cuda for CPU build."
+}
+
 Patch-WindowsCompatibility
 
 if (Test-Path (Join-Path $BuildDir "CMakeCache.txt")) {
@@ -87,8 +96,22 @@ if (Test-Path (Join-Path $BuildDir "CMakeCache.txt")) {
     Remove-Item -LiteralPath $BuildDir -Recurse -Force
 }
 
-Write-Host "[CONFIGURE] llama.cpp-omni" -ForegroundColor Cyan
-cmake -S $RepoDir -B $BuildDir -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=OFF
+$CmakeArgs = @(
+    "-S", $RepoDir,
+    "-B", $BuildDir,
+    "-G", "Ninja",
+    "-DCMAKE_BUILD_TYPE=Release",
+    "-DLLAMA_CURL=OFF"
+)
+
+if ($Cuda) {
+    Write-Host "[CONFIGURE] llama.cpp-omni CUDA build" -ForegroundColor Cyan
+    $CmakeArgs += "-DGGML_CUDA=ON"
+} else {
+    Write-Host "[CONFIGURE] llama.cpp-omni CPU build" -ForegroundColor Cyan
+}
+
+cmake @CmakeArgs
 if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed. Try running from Developer PowerShell for Visual Studio."
 }
