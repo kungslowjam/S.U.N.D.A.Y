@@ -14,6 +14,7 @@ omni-lab/
 ├── run_omni_text_only.ps1
 ├── run_omni_full.ps1
 ├── open_omni_output.ps1
+├── start_omni_test_ui.ps1
 └── cleanup_omni_lab.ps1
 ```
 
@@ -49,6 +50,12 @@ If CMake cannot find a compiler, run the command from **Developer PowerShell for
 
 ```powershell
 .\omni-lab\open_omni_output.ps1
+```
+
+Or launch the local browser test UI:
+
+```powershell
+.\omni-lab\start_omni_test_ui.ps1
 ```
 
 ## Cleanup
