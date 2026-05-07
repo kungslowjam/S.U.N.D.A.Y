@@ -12,18 +12,11 @@ import {
   Download,
   Upload,
   Trash2,
-  Mic,
-  Key,
-  Search,
   Brain,
   Package,
-  Plus,
-  RefreshCw,
-  X,
-  Sparkles,
 } from 'lucide-react';
 import { useAppStore, type ThemeMode } from '../lib/store';
-import { checkHealth, fetchSpeechHealth, getMemoryStats, fetchInstalledSkills, fetchSkillSources, fetchAvailableSkills, installSkill, removeSkill, syncSkills, type InstalledSkill, type SkillSource, type AvailableSkill } from '../lib/api';
+import { checkHealth, fetchSpeechHealth, getMemoryStats } from '../lib/api';
 
 function ModelList() {
   const [models, setModels] = useState<string[]>([]);
@@ -453,7 +446,7 @@ export function SettingsPage() {
           </Section>
 
           {/* Skills */}
-          <SkillsSection />
+          <SkillsShortcut />
 
           {/* Model defaults */}
           <Section title="Model Defaults">
@@ -595,205 +588,43 @@ export function SettingsPage() {
               </div>
             </div>
           </Section>
-
-          <SkillsSection />
         </div>
       </div>
     </div>
   );
 }
 
-function SkillsSection() {
-  const [installed, setInstalled] = useState<InstalledSkill[]>([]);
-  const [sources, setSources] = useState<SkillSource[]>([]);
-  const [available, setAvailable] = useState<AvailableSkill[]>([]);
-  const [showInstall, setShowInstall] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [installing, setInstalling] = useState<string | null>(null);
-  const [selectedSource, setSelectedSource] = useState('');
-
-  const loadInstalled = async () => {
-    try {
-      const skills = await fetchInstalledSkills();
-      setInstalled(skills);
-    } catch {}
-  };
-
-  const loadSources = async () => {
-    try {
-      const srcs = await fetchSkillSources();
-      setSources(srcs);
-      if (srcs.length > 0 && !selectedSource) {
-        setSelectedSource(srcs[0].source);
-      }
-    } catch {}
-  };
-
-  const loadAvailable = async () => {
-    if (!selectedSource && !searchQuery) return;
-    setLoading(true);
-    try {
-      const skills = await fetchAvailableSkills(selectedSource || undefined, searchQuery || undefined);
-      setAvailable(skills);
-    } catch {}
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    loadInstalled();
-    loadSources();
-  }, []);
-
-  useEffect(() => {
-    if (showInstall) {
-      loadAvailable();
-    }
-  }, [showInstall, selectedSource, searchQuery]);
-
-  const handleInstall = async (skill: AvailableSkill) => {
-    setInstalling(skill.name);
-    try {
-      await installSkill(skill.source, skill.name);
-      await loadInstalled();
-      setAvailable(available.filter(s => s.name !== skill.name));
-    } catch (e: any) {
-      alert(`Failed to install: ${e.message}`);
-    }
-    setInstalling(null);
-  };
-
-  const handleRemove = async (name: string) => {
-    if (!confirm(`Remove skill "${name}"?`)) return;
-    try {
-      await removeSkill(name);
-      await loadInstalled();
-    } catch (e: any) {
-      alert(`Failed to remove: ${e.message}`);
-    }
-  };
-
-  const handleSync = async () => {
-    setLoading(true);
-    try {
-      await syncSkills(selectedSource);
-      await loadInstalled();
-    } catch (e: any) {
-      alert(`Sync failed: ${e.message}`);
-    }
-    setLoading(false);
-  };
-
+function SkillsShortcut() {
   return (
     <Section title="Skills">
-      <div className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-sm" style={{ color: 'var(--color-text)' }}>Installed skills</span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setShowInstall(!showInstall)}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer"
-              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
-            >
-              <Plus size={12} /> Install
-            </button>
-            <button
-              onClick={handleSync}
-              disabled={loading}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer"
-              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)' }}
-            >
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} /> Sync
-            </button>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <div
+            className="flex h-10 w-10 items-center justify-center rounded-lg"
+            style={{ background: 'var(--color-bg-secondary)' }}
+          >
+            <Package size={18} style={{ color: 'var(--color-accent)' }} />
+          </div>
+          <div>
+            <div className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
+              Manage agent skills
+            </div>
+            <p className="mt-1 max-w-xl text-xs leading-5" style={{ color: 'var(--color-text-tertiary)' }}>
+              Install, remove, sync, and browse skill catalogs from the dedicated Skills page.
+            </p>
           </div>
         </div>
-        {installed.length === 0 ? (
-          <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No skills installed</div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {installed.map(skill => (
-              <span
-                key={skill.name}
-                className="flex items-center gap-1 px-2 py-1 rounded text-xs"
-                style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text)' }}
-              >
-                <Sparkles size={10} style={{ color: 'var(--color-accent)' }} />
-                {skill.name}
-                <button
-                  onClick={() => handleRemove(skill.name)}
-                  className="ml-1 p-0.5 rounded hover:bg-red-500/20 cursor-pointer"
-                  style={{ color: 'var(--color-text-tertiary)' }}
-                >
-                  <X size={10} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
+        <a
+          href="/skills"
+          className="inline-flex h-9 items-center justify-center rounded-lg px-3 text-sm font-medium"
+          style={{
+            background: 'var(--color-accent)',
+            color: 'var(--color-on-accent)',
+          }}
+        >
+          Open Skills
+        </a>
       </div>
-
-      {showInstall && (
-        <div className="border-t pt-4 mt-2" style={{ borderColor: 'var(--color-border-subtle)' }}>
-          <div className="text-sm font-medium mb-3" style={{ color: 'var(--color-text)' }}>Install from source</div>
-          <div className="flex gap-2 mb-3">
-            <select
-              value={selectedSource}
-              onChange={e => setSelectedSource(e.target.value)}
-              className="text-sm px-2 py-1.5 rounded-lg outline-none cursor-pointer"
-              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
-            >
-              <option value="">All sources</option>
-              {sources.map(s => (
-                <option key={s.source} value={s.source}>{s.source}</option>
-              ))}
-            </select>
-            <div className="flex-1 relative">
-              <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2" style={{ color: 'var(--color-text-tertiary)' }} />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Search skills..."
-                className="w-full pl-7 pr-3 py-1.5 rounded-lg text-sm outline-none"
-                style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
-              />
-            </div>
-          </div>
-          {loading ? (
-            <div className="text-xs py-2" style={{ color: 'var(--color-text-tertiary)' }}>Loading...</div>
-          ) : available.length === 0 ? (
-            <div className="text-xs py-2" style={{ color: 'var(--color-text-tertiary)' }}>
-              {searchQuery ? 'No skills found' : 'Configure skill sources in config.toml to browse'}
-            </div>
-          ) : (
-            <div className="max-h-48 overflow-y-auto space-y-2">
-              {available.map(skill => (
-                <div
-                  key={`${skill.source}:${skill.name}`}
-                  className="flex items-center justify-between p-2 rounded"
-                  style={{ background: 'var(--color-bg-secondary)' }}
-                >
-                  <div>
-                    <div className="text-sm" style={{ color: 'var(--color-text)' }}>{skill.name}</div>
-                    <div className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                      {skill.source} / {skill.category}
-                      {skill.description && ` — ${skill.description.slice(0, 60)}`}
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => handleInstall(skill)}
-                    disabled={installing === skill.name}
-                    className="flex items-center gap-1 px-2 py-1 rounded text-xs cursor-pointer"
-                    style={{ background: 'var(--color-accent)', color: 'white' }}
-                  >
-                    {installing === skill.name ? '...' : <><Plus size={10} /> Install</>}
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
     </Section>
   );
 }

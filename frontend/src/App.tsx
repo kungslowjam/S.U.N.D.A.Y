@@ -55,20 +55,28 @@ export default function App() {
     return () => clearInterval(interval);
   }, [importOverlay]);
 
-  // Fetch models on mount
+  // Fetch models and bind the active selector to the model actually served by
+  // the backend. /v1/models is a catalog; /v1/info is the running model.
   useEffect(() => {
-    fetchModels()
-      .then((m) => {
+    Promise.all([
+      fetchModels().catch(() => []),
+      fetchServerInfo().catch(() => null),
+    ])
+      .then(([m, info]) => {
         setModels(m);
-        if (!selectedModel && m.length > 0) setSelectedModel(m[0].id);
+        if (info) setServerInfo(info);
+        const runningModel = info?.model || '';
+        if (runningModel) {
+          setSelectedModel(runningModel);
+        } else if (!selectedModel && m.length > 0) {
+          setSelectedModel(m[0].id);
+        }
       })
-      .catch(() => setModels([]))
+      .catch(() => {
+        setModels([]);
+        setServerInfo(null);
+      })
       .finally(() => setModelsLoading(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Fetch server info
-  useEffect(() => {
-    fetchServerInfo().then(setServerInfo).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll savings and optionally share to Supabase

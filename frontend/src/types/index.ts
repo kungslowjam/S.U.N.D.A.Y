@@ -38,6 +38,7 @@ export interface ToolCallEndEvent {
 export interface ToolCallInfo {
   id: string;
   tool: string;
+  kind?: 'tool' | 'skill';
   arguments: string;
   status: 'running' | 'success' | 'error';
   result?: string;

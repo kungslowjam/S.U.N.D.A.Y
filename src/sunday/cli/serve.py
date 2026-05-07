@@ -167,6 +167,7 @@ def serve(
 
     # Resolve agent
     agent = None
+    system_for_agent = None
     agent_key = agent_name or config.server.agent
     if agent_key:
         try:
@@ -181,44 +182,31 @@ def serve(
 
                 # Load tools for agents that support them
                 if getattr(agent_cls, "accepts_tools", False):
-                    import sunday.tools  # noqa: F401  # trigger registration
-                    from sunday.core.registry import ToolRegistry
-                    from sunday.tools._stubs import BaseTool
+                    from sunday.system import SystemBuilder
 
-                    _DEFAULT_TOOLS = {"think", "calculator", "web_search"}
-                    configured = config.agent.tools
-                    if configured:
-                        if isinstance(configured, list):
-                            allowed = {
-                                t.strip()
-                                for t in configured
-                                if isinstance(t, str) and t.strip()
-                            }
-                        else:
-                            allowed = {
-                                t.strip() for t in configured.split(",") if t.strip()
-                            }
-                    else:
-                        allowed = _DEFAULT_TOOLS
-
-                    tools = []
-                    for name in ToolRegistry.keys():
-                        if name not in allowed:
-                            continue
-                        tool_cls = ToolRegistry.get(name)
-                        if isinstance(tool_cls, type) and issubclass(
-                            tool_cls, BaseTool
-                        ):
-                            tools.append(tool_cls())
-                        elif isinstance(tool_cls, BaseTool):
-                            tools.append(tool_cls)
-                    if tools:
-                        agent_kwargs["tools"] = tools
-
-                if getattr(agent_cls, "accepts_tools", False):
+                    system_for_agent = (
+                        SystemBuilder(config)
+                        .engine(engine_key or config.engine.default)
+                        .model(model_name)
+                        .agent(agent_key)
+                        .event_bus(bus)
+                        .telemetry(False)
+                        .traces(config.traces.enabled)
+                        .speech(False)
+                        .build()
+                    )
+                    agent_kwargs["tools"] = system_for_agent.tools
                     agent_kwargs["max_turns"] = config.agent.max_turns
+                    examples = getattr(system_for_agent, "_skill_few_shot_examples", None)
+                    if examples:
+                        agent_kwargs["skill_few_shot_examples"] = examples
 
                 agent = agent_cls(engine, model_name, **agent_kwargs)
+                if system_for_agent is not None:
+                    try:
+                        agent._skill_manager = system_for_agent.skill_manager
+                    except Exception:
+                        pass
         except Exception as exc:
             import traceback
 

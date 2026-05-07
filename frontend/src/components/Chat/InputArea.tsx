@@ -1,11 +1,20 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { ArrowUp, Square } from 'lucide-react';
 import { useAppStore, generateId } from '../../lib/store';
 import { streamChat } from '../../lib/sse';
 import { fetchSavings, getBase } from '../../lib/api';
 import { MicButton } from './MicButton';
 import { useSpeech } from '../../hooks/useSpeech';
 import type { ChatMessage, ToolCallInfo, TokenUsage, MessageTelemetry } from '../../types';
+
+function toDisplayString(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
 
 export function InputArea() {
   const [input, setInput] = useState('');
@@ -100,6 +109,7 @@ export function InputArea() {
     let usage: TokenUsage | undefined;
     let complexity: { score: number; tier: string; suggested_max_tokens: number } | undefined;
     const toolCalls: ToolCallInfo[] = [];
+    const skillStartedAt = new Map<string, number>();
     let lastFlush = 0;
     let ttftMs: number | undefined;
 
@@ -110,8 +120,26 @@ export function InputArea() {
     });
 
     try {
+      const agentToolsMarker = [
+        {
+          type: 'function',
+          function: {
+            name: 'sunday_agent_tools',
+            description: 'Route this chat turn through the SUNDAY agent so configured tools and skills are available.',
+            parameters: { type: 'object', properties: {} },
+          },
+        },
+      ];
+
       for await (const sseEvent of streamChat(
-        { model: selectedModel, messages: apiMessages, stream: true, temperature, max_tokens: maxTokens },
+        {
+          model: selectedModel,
+          messages: apiMessages,
+          stream: true,
+          temperature,
+          max_tokens: maxTokens,
+          tools: agentToolsMarker,
+        },
         controller.signal,
       )) {
         const eventName = sseEvent.event;
@@ -123,16 +151,63 @@ export function InputArea() {
         } else if (eventName === 'tool_call_start') {
           try {
             const data = JSON.parse(sseEvent.data);
-            const tc: ToolCallInfo = { id: generateId(), tool: data.tool, arguments: data.arguments || '', status: 'running' };
+            const tc: ToolCallInfo = {
+              id: generateId(),
+              tool: toDisplayString(data.tool || 'unknown-tool'),
+              arguments: toDisplayString(data.arguments),
+              status: 'running',
+            };
+            if (tc.tool.startsWith('skill_')) tc.kind = 'skill';
             toolCalls.push(tc);
-            setStreamState({ phase: `Calling ${data.tool}...`, activeToolCalls: [...toolCalls] });
+            setStreamState({
+              phase: `${tc.kind === 'skill' ? 'Using skill' : 'Calling'} ${tc.tool}...`,
+              activeToolCalls: [...toolCalls],
+            });
             updateLastAssistant(convId, accumulatedContent, [...toolCalls]);
           } catch {}
         } else if (eventName === 'tool_call_end') {
           try {
             const data = JSON.parse(sseEvent.data);
-            const tc = toolCalls.find((t) => t.tool === data.tool && t.status === 'running');
-            if (tc) { tc.status = data.success ? 'success' : 'error'; tc.latency = data.latency; tc.result = data.result; }
+            const toolName = toDisplayString(data.tool || 'unknown-tool');
+            const tc = toolCalls.find((t) => t.tool === toolName && t.status === 'running');
+            if (tc) {
+              tc.status = data.success ? 'success' : 'error';
+              tc.latency = data.latency;
+              tc.result = toDisplayString(data.result);
+            }
+            setStreamState({ phase: 'Generating...', activeToolCalls: [...toolCalls] });
+            updateLastAssistant(convId, accumulatedContent, [...toolCalls]);
+          } catch {}
+        } else if (eventName === 'skill_execute_start') {
+          try {
+            const data = JSON.parse(sseEvent.data);
+            const skillName = data.skill || data.name || 'unknown-skill';
+            skillStartedAt.set(skillName, Date.now());
+            const steps = typeof data.steps === 'number' ? `${data.steps} step${data.steps === 1 ? '' : 's'}` : '';
+            const tc: ToolCallInfo = {
+              id: generateId(),
+              tool: skillName,
+              kind: 'skill',
+              arguments: steps,
+              status: 'running',
+            };
+            toolCalls.push(tc);
+            setStreamState({ phase: `Using skill ${skillName}...`, activeToolCalls: [...toolCalls] });
+            updateLastAssistant(convId, accumulatedContent, [...toolCalls]);
+          } catch {}
+        } else if (eventName === 'skill_execute_end') {
+          try {
+            const data = JSON.parse(sseEvent.data);
+            const skillName = data.skill || data.name || 'unknown-skill';
+            const tc = [...toolCalls].reverse().find((t) => t.kind === 'skill' && t.tool === skillName && t.status === 'running');
+            if (tc) {
+              tc.status = data.success ? 'success' : 'error';
+              const startedAt = skillStartedAt.get(skillName);
+              if (startedAt) tc.latency = Date.now() - startedAt;
+              if (data.result || data.output || data.error) {
+                tc.result = String(data.result || data.output || data.error);
+              }
+            }
             setStreamState({ phase: 'Generating...', activeToolCalls: [...toolCalls] });
             updateLastAssistant(convId, accumulatedContent, [...toolCalls]);
           } catch {}
@@ -195,18 +270,20 @@ export function InputArea() {
   const canSend = input.trim().length > 0 && !modelLoading;
 
   return (
-    <div className="w-full shrink-0" style={{ background: 'var(--color-bg)' }}>
-      <div className="max-w-[var(--chat-max-width)] mx-auto px-4 pb-4">
+    <div className="w-full shrink-0" style={{ background: 'transparent' }}>
+      <div className="max-w-[var(--chat-max-width)] mx-auto px-4 pb-5 pt-2">
         <div className="relative">
           <div
-            className="flex items-end gap-2 rounded-2xl px-4 py-3 transition-shadow"
+            className="flex items-end gap-3 rounded-2xl px-5 py-4 transition-all duration-300"
             style={{
-              background: 'var(--color-input-bg)',
-              border: '1px solid var(--color-input-border)',
-              boxShadow: 'var(--shadow-chat)',
+              background: 'rgba(30, 30, 30, 0.7)',
+              backdropFilter: 'blur(20px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05)',
             }}
           >
-            <div className="flex-1 flex items-end gap-2">
+            <div className="flex-1 flex items-end gap-3">
               <MicButton
                 state={speechState}
                 onClick={handleMicClick}
@@ -218,38 +295,81 @@ export function InputArea() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message SUNDAY..."
+                placeholder="Ask me anything..."
                 rows={1}
-                className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed placeholder:text-[var(--color-text-tertiary)]"
-                style={{ color: 'var(--color-text)', maxHeight: '200px' }}
+                className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed placeholder:text-gray-500"
+                style={{ 
+                  color: '#e5e7eb', 
+                  maxHeight: '200px',
+                  fontSize: '15px',
+                }}
                 disabled={streamState.isStreaming || modelLoading}
               />
             </div>
             {streamState.isStreaming ? (
               <button
                 onClick={stopStreaming}
-                className="p-2 rounded-xl transition-all shrink-0 cursor-pointer"
-                style={{ background: 'var(--color-text)', color: 'var(--color-bg)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
-                onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
+                className="relative overflow-hidden group"
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'scale(1.05)';
+                  e.currentTarget.style.boxShadow = '0 6px 16px rgba(239, 68, 68, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'scale(1)';
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(239, 68, 68, 0.3)';
+                }}
                 title="Stop generating"
               >
-                <Square size={14} fill="currentColor" />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                  <div style={{ width: '12px', height: '12px', background: 'white', borderRadius: '2px' }} />
+                </div>
               </button>
             ) : (
               <button
                 onClick={sendMessage}
                 disabled={!canSend}
-                className="p-2 rounded-xl transition-all shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-default"
+                className="relative overflow-hidden"
                 style={{
-                  background: canSend ? 'var(--color-text)' : 'var(--color-bg-tertiary)',
-                  color: canSend ? 'var(--color-bg)' : 'var(--color-text-tertiary)',
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  background: canSend 
+                    ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)'
+                    : 'rgba(75, 85, 99, 0.5)',
+                  cursor: canSend ? 'pointer' : 'default',
+                  opacity: canSend ? 1 : 0.5,
+                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                  boxShadow: canSend ? '0 4px 14px rgba(59, 130, 246, 0.4)' : 'none',
                 }}
-                onMouseEnter={(e) => { if (canSend) e.currentTarget.style.opacity = '0.85'; }}
-                onMouseLeave={(e) => { if (canSend) e.currentTarget.style.opacity = '1'; }}
+                onMouseEnter={(e) => { 
+                  if (canSend) {
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                    e.currentTarget.style.boxShadow = '0 6px 18px rgba(59, 130, 246, 0.5)';
+                  }
+                }}
+                onMouseLeave={(e) => { 
+                  if (canSend) {
+                    e.currentTarget.style.transform = 'scale(1)';
+                    e.currentTarget.style.boxShadow = '0 4px 14px rgba(59, 130, 246, 0.4)';
+                  }
+                }}
                 title="Send message"
               >
-                <ArrowUp size={16} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ color: canSend ? 'white' : '#6b7280' }}>
+                    <path d="M22 2L11 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
               </button>
             )}
           </div>

@@ -964,14 +964,14 @@ export interface SkillSource {
 }
 
 export async function fetchInstalledSkills(): Promise<InstalledSkill[]> {
-  const res = await fetch(`${getBase()}/v1/skills`);
+  const res = await fetch(`${getBase()}/v1/skills`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch skills');
   const data = await res.json();
   return data.skills || [];
 }
 
 export async function fetchSkillSources(): Promise<SkillSource[]> {
-  const res = await fetch(`${getBase()}/v1/skills/sources`);
+  const res = await fetch(`${getBase()}/v1/skills/sources`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch sources');
   const data = await res.json();
   return data.sources || [];
@@ -982,7 +982,8 @@ export async function fetchAvailableSkills(source?: string, search?: string, cat
   if (source) params.set('source', source);
   if (search) params.set('search', search);
   if (category) params.set('category', category);
-  const res = await fetch(`${getBase()}/v1/skills/available?${params}`);
+  params.set('_', String(Date.now()));
+  const res = await fetch(`${getBase()}/v1/skills/available?${params}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('Failed to fetch available skills');
   const data = await res.json();
   return data.skills || [];

@@ -106,8 +106,16 @@ class OpenClawResolver(SourceResolver):
             except OSError:
                 continue
             category = self._category_from_catalog_file(catalog_file)
+            current_category = category
             for line in raw.splitlines():
-                parsed = self._parse_catalog_line(line, category, catalog_file, commit)
+                next_category = self._parse_catalog_category(line)
+                if next_category:
+                    current_category = next_category
+                    continue
+
+                parsed = self._parse_catalog_line(
+                    line, current_category, catalog_file, commit
+                )
                 if parsed is None or parsed.name in seen:
                     continue
                 seen.add(parsed.name)
@@ -123,11 +131,11 @@ class OpenClawResolver(SourceResolver):
         commit: str,
     ) -> ResolvedSkill | None:
         stripped = line.strip()
-        detail_match = re.match(r"<summary><h3[^>]*>(.*?)</h3></summary>", stripped)
-        if detail_match:
-            category = detail_match.group(1).strip()
 
-        bullet_match = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)\s*-\s*(.*)", stripped)
+        bullet_match = re.match(
+            r"-\s+(?:\*\*)?\[([^\]]+)\]\(([^)]+)\)(?:\*\*)?\s*-\s*(.*)",
+            stripped,
+        )
         if not bullet_match:
             return None
 
@@ -146,6 +154,16 @@ class OpenClawResolver(SourceResolver):
             commit=commit,
             sidecar_data={"catalog_only": True, "url": url},
         )
+
+    def _parse_catalog_category(self, line: str) -> str:
+        stripped = line.strip()
+        detail_match = re.match(r"<summary><h3[^>]*>(.*?)</h3></summary>", stripped)
+        if detail_match:
+            return self._clean_markdown_cell(detail_match.group(1))
+        heading_match = re.match(r"#{2,4}\s+(.+)", stripped)
+        if heading_match:
+            return self._clean_markdown_cell(heading_match.group(1))
+        return ""
 
     def _clean_markdown_cell(self, value: str) -> str:
         value = value.replace("`", "").strip()

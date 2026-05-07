@@ -161,6 +161,72 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     )
 
 
+@router.post("/v1/voice/turn")
+async def voice_turn(request: Request):
+    """Voice adapter endpoint for the SUNDAY agent core.
+
+    The voice overlay owns mic/STT/TTS. This endpoint owns SUNDAY's brain:
+    agent routing, tools, skills, memory, and local/cloud model routing.
+    It intentionally returns one final text response in Phase 1 so the
+    existing voice sidecar can remain isolated from the core chat routes.
+    """
+    body = await request.json()
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="'text' is required")
+
+    from sunday.server.models import ChatMessage
+
+    configured_model = getattr(request.app.state, "model", "local-model")
+    model = str(body.get("model") or configured_model)
+    if model in {"", "local-model"}:
+        model = configured_model
+    max_tokens = int(body.get("max_tokens") or 512)
+    temperature = float(body.get("temperature") or 0.4)
+
+    raw_messages = body.get("messages") or []
+    messages = []
+    for msg in raw_messages:
+        role = str(msg.get("role", "user"))
+        content = str(msg.get("content", "")).strip()
+        if content:
+            messages.append(ChatMessage(role=role, content=content))
+
+    if not messages or messages[-1].role != "user" or messages[-1].content != text:
+        messages.append(ChatMessage(role="user", content=text))
+
+    request_body = ChatCompletionRequest(
+        model=model,
+        messages=messages[-12:],
+        temperature=temperature,
+        max_tokens=max_tokens,
+        stream=False,
+        tools=body.get("tools"),
+    )
+
+    agent = getattr(request.app.state, "agent", None)
+    if agent is not None:
+        result = _handle_agent(agent, model, request_body)
+    else:
+        result = _handle_direct(
+            request.app.state.engine,
+            model,
+            request_body,
+            bus=getattr(request.app.state, "bus", None),
+        )
+
+    content = ""
+    if result.choices:
+        content = result.choices[0].message.content or ""
+    return {
+        "type": "voice_turn",
+        "text": content,
+        "model": model,
+        "agent": getattr(request.app.state, "agent_name", None),
+        "usage": result.usage.model_dump() if result.usage else {},
+    }
+
+
 def _handle_direct(
     engine,
     model: str,
@@ -250,12 +316,26 @@ def _handle_agent(
 
     # Override agent model for this request if the caller specified one
     original_model = agent._model
+    original_playbooks = getattr(agent, "_skill_playbooks", None)
     if model:
         agent._model = model
     try:
+        skill_manager = getattr(agent, "_skill_manager", None)
+        if skill_manager is not None and hasattr(agent, "_skill_playbooks"):
+            try:
+                agent._skill_playbooks = skill_manager.select_relevant_playbooks(
+                    input_text
+                )
+            except Exception:
+                logging.getLogger("sunday.server").debug(
+                    "Skill playbook selection failed",
+                    exc_info=True,
+                )
         result = agent.run(input_text, context=ctx)
     finally:
         agent._model = original_model
+        if original_playbooks is not None:
+            agent._skill_playbooks = original_playbooks
 
     usage = UsageInfo(
         prompt_tokens=result.metadata.get("prompt_tokens", 0),

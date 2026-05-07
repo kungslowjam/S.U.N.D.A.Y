@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SUNDAY Voice Live</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="topbar">
+      <div>
+        <h1>SUNDAY Voice Live</h1>
+        <p id="status">Idle</p>
+      </div>
+      <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
+    </section>
+
+    <section class="controls">
+      <button id="toggleBtn" type="button">Start live</button>
+      <button id="talkBtn" type="button" disabled>Hold to talk</button>
+      <button id="interruptBtn" type="button" disabled>Interrupt</button>
+      <label>
+        Mode
+        <select id="modeInput">
+          <option value="balanced" selected>Balanced</option>
+          <option value="quick">Quick</option>
+        </select>
+      </label>
+      <label>
+        STT
+        <select id="sttInput">
+          <option value="browser">Browser</option>
+          <option value="local" selected>Local Auto</option>
+          <option value="push">Push-to-talk</option>
+        </select>
+      </label>
+      <label>
+        STT Model
+        <select id="sttModelInput">
+          <option value="tiny">Tiny Multi</option>
+          <option value="base">Base Multi</option>
+          <option value="small">Small Multi</option>
+          <option value="pariya47/distill-whisper-th-large-v3-ct2">Thai Distill CT2</option>
+          <option value="Vinxscribe/biodatlab-whisper-th-medium-faster" selected>Thai Medium CT2</option>
+          <option value="tiny.en">Tiny EN</option>
+          <option value="base.en">Base EN</option>
+        </select>
+      </label>
+      <label>
+        STT Lang
+        <select id="sttLangInput">
+          <option value="auto" selected>Auto</option>
+          <option value="th">Thai</option>
+          <option value="en">English</option>
+        </select>
+      </label>
+      <label>
+        SUNDAY Agent
+        <input id="endpointInput" value="http://127.0.0.1:8000/v1/voice/turn">
+      </label>
+      <label>
+        Fast Fallback
+        <input id="fallbackEndpointInput" value="http://127.0.0.1:8082/v1/chat/completions">
+      </label>
+      <label>
+        Model
+        <input id="modelInput" value="local-model">
+      </label>
+      <label>
+        Voice
+        <select id="voiceInput">
+          <option value="auto" selected>Auto TH/EN</option>
+          <option value="en-US-AvaNeural">Ava</option>
+          <option value="en-US-AriaNeural">Aria</option>
+          <option value="en-US-GuyNeural">Guy</option>
+          <option value="en-GB-SoniaNeural">Sonia</option>
+          <option value="th-TH-PremwadeeNeural">Premwadee TH</option>
+        </select>
+      </label>
+    </section>
+
+    <section class="stats">
+      <span id="latencyText">Latency: -</span>
+      <span id="turnText">Turns: 0</span>
+      <span>Tip: speak in short sentences; interrupt by talking or pressing Interrupt.</span>
+    </section>
+
+    <section class="conversation" id="conversation" aria-live="polite"></section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

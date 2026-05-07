@@ -38,6 +38,11 @@ except ImportError:
     pass
 
 try:
+    import sunday.tools.academic_search  # noqa: F401
+except ImportError:
+    pass
+
+try:
     import sunday.tools.code_interpreter  # noqa: F401
 except ImportError:
     pass

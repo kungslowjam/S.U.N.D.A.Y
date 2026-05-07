@@ -28,27 +28,27 @@ export function Layout() {
         <div
           className="flex items-center gap-3 px-4 py-2.5 text-sm shrink-0 z-50"
           style={{
-            background: 'color-mix(in srgb, var(--color-error) 10%, transparent)',
-            borderBottom: '1px solid color-mix(in srgb, var(--color-error) 15%, transparent)',
-            color: 'var(--color-text)',
+            background: 'rgba(239, 68, 68, 0.15)',
+            borderBottom: '1px solid rgba(239, 68, 68, 0.2)',
+            color: '#fca5a5',
           }}
         >
           <span
             className="w-2 h-2 rounded-full shrink-0"
-            style={{ background: 'var(--color-error)' }}
+            style={{ background: '#ef4444' }}
           />
           <span>Cannot reach SUNDAY backend</span>
           <button
             onClick={() => navigate('/settings')}
             className="text-sm underline cursor-pointer ml-auto shrink-0"
-            style={{ color: 'var(--color-text-secondary)' }}
+            style={{ color: '#fca5a5' }}
           >
             Change URL
           </button>
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0 relative" style={{ background: 'var(--color-bg)' }}>
+      <div className="flex flex-1 min-h-0 relative" style={{ background: '#0f0f0f' }}>
         <Sidebar />
         {sidebarOpen && (
           <div
@@ -56,7 +56,7 @@ export function Layout() {
             onClick={() => useAppStore.getState().setSidebarOpen(false)}
           />
         )}
-        <main className="flex-1 flex flex-col min-w-0 h-full relative" style={{ background: 'var(--color-bg)' }}>
+        <main className="flex-1 flex flex-col min-w-0 h-full relative" style={{ background: 'transparent' }}>
           <Outlet />
         </main>
       </div>

@@ -31,6 +31,8 @@ _EVENT_MAP = {
     EventType.INFERENCE_END: "inference_end",
     EventType.TOOL_CALL_START: "tool_call_start",
     EventType.TOOL_CALL_END: "tool_call_end",
+    EventType.SKILL_EXECUTE_START: "skill_execute_start",
+    EventType.SKILL_EXECUTE_END: "skill_execute_end",
 }
 
 # Sentinel signalling that the agent thread has finished
@@ -135,12 +137,23 @@ class AgentStreamBridge:
 
         # Override agent model for this request if the caller specified one
         original_model = self._agent._model
+        original_playbooks = getattr(self._agent, "_skill_playbooks", None)
         if self._model:
             self._agent._model = self._model
         try:
+            skill_manager = getattr(self._agent, "_skill_manager", None)
+            if skill_manager is not None and hasattr(self._agent, "_skill_playbooks"):
+                try:
+                    self._agent._skill_playbooks = skill_manager.select_relevant_playbooks(
+                        input_text
+                    )
+                except Exception:
+                    pass
             return self._agent.run(input_text, context=ctx)
         finally:
             self._agent._model = original_model
+            if original_playbooks is not None:
+                self._agent._skill_playbooks = original_playbooks
 
     # ------------------------------------------------------------------
     # Public streaming interface
@@ -222,11 +235,23 @@ class AgentStreamBridge:
             # Emit tool results metadata if any
             tool_results_data = []
             for tr in agent_result.tool_results:
+                output = tr.content
+                if (
+                    tr.metadata.get("skill_kind") == "instructional"
+                    or tr.tool_name.startswith("skill_")
+                    and tr.metadata.get("steps", 0) == 0
+                ):
+                    output = (
+                        f"Loaded instructional skill "
+                        f"`{tr.metadata.get('skill', tr.tool_name)}`."
+                    )
+                elif len(output) > 2000:
+                    output = output[:2000] + "\n\n[Output truncated]"
                 tool_results_data.append(
                     {
                         "tool_name": tr.tool_name,
                         "success": tr.success,
-                        "output": tr.content,
+                        "output": output,
                         "latency_ms": tr.latency_seconds * 1000,
                     }
                 )
@@ -243,7 +268,12 @@ class AgentStreamBridge:
             engine = getattr(self._agent, "_engine", None)
             used_real_streaming = False
 
-            if engine is not None and hasattr(engine, "stream_full") and content:
+            if (
+                engine is not None
+                and hasattr(engine, "stream_full")
+                and content
+                and not tool_results_data
+            ):
                 # Re-stream using the engine for real token delivery.
                 # Build the same messages the agent used for its final turn.
                 try:
@@ -341,11 +371,29 @@ class AgentStreamBridge:
 
             yield "data: [DONE]\n\n"
 
-        except Exception:
+        except Exception as exc:
             # On error, cancel the agent task if still running
             if not agent_task.done():
                 agent_task.cancel()
-            raise
+            import logging
+
+            logging.getLogger("sunday.server").error(
+                "Agent stream bridge failed: %s",
+                exc,
+                exc_info=True,
+            )
+            error_chunk = ChatCompletionChunk(
+                id=self._chunk_id,
+                model=self._model,
+                choices=[
+                    StreamChoice(
+                        delta=DeltaMessage(content=f"Error: {exc}"),
+                        finish_reason="stop",
+                    )
+                ],
+            )
+            yield f"data: {error_chunk.model_dump_json()}\n\n"
+            yield "data: [DONE]\n\n"
         finally:
             self._unsubscribe_all()
 

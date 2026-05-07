@@ -5,9 +5,11 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+import re
+import urllib.request
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -408,6 +410,57 @@ async def telemetry_energy(request: Request):
 skills_router = APIRouter(prefix="/v1/skills", tags=["skills"])
 
 
+def _resolve_catalog_github_url(catalog_url: str) -> str:
+    """Return an installable GitHub URL from a catalog or GitHub URL."""
+    if not catalog_url:
+        return ""
+    if "github.com/" in catalog_url:
+        return catalog_url
+    if "officialskills.sh/" not in catalog_url:
+        return ""
+
+    try:
+        req = urllib.request.Request(
+            catalog_url,
+            headers={
+                "User-Agent": "SUNDAY/skills-installer",
+                "Accept": "text/html,application/xhtml+xml",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=15) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+    tree_match = re.search(
+        r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/tree/[^\"'<\s]+",
+        html,
+    )
+    if tree_match:
+        return tree_match.group(0)
+
+    repo_match = re.search(
+        r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:\.git)?",
+        html,
+    )
+    return repo_match.group(0) if repo_match else ""
+
+
+def _split_github_repo_url(github_url: str) -> tuple[str, str, str]:
+    """Return (clone_url, cache_key, subpath) for GitHub repo or tree URL."""
+    match = re.match(
+        r"https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?(?:/tree/([^/\s]+)/(.+))?/?$",
+        github_url,
+    )
+    if not match:
+        return github_url, github_url.rstrip("/").rsplit("/", 1)[-1], ""
+
+    owner, repo, _branch, subpath = match.groups()
+    clone_url = f"https://github.com/{owner}/{repo}.git"
+    cache_key = f"{owner}-{repo}"
+    return clone_url, cache_key, (subpath or "").strip("/")
+
+
 def _default_skill_sources():
     from sunday.core.config import SkillSourceConfig
 
@@ -422,6 +475,11 @@ def _default_skill_sources():
             url="https://github.com/VoltAgent/awesome-openclaw-skills.git",
             auto_update=True,
         ),
+        SkillSourceConfig(
+            source="officialskills",
+            url="https://github.com/VoltAgent/awesome-agent-skills.git",
+            auto_update=True,
+        ),
     ]
 
 
@@ -433,8 +491,9 @@ def _configured_skill_sources():
 
 
 @skills_router.get("")
-async def list_skills(request: Request):
+async def list_skills(request: Request, response: Response):
     """List installed skills with details."""
+    response.headers["Cache-Control"] = "no-store"
     try:
         from pathlib import Path
 
@@ -483,6 +542,7 @@ async def install_skill(req: SkillInstallRequest, request: Request):
         from sunday.skills.parser import SkillParser
         from sunday.skills.sources.github import GitHubResolver
         from sunday.skills.sources.hermes import HermesResolver
+        from sunday.skills.sources.officialskills import OfficialSkillsResolver
         from sunday.skills.sources.openclaw import OpenClawResolver
         from sunday.skills.tool_translator import ToolTranslator
 
@@ -490,6 +550,8 @@ async def install_skill(req: SkillInstallRequest, request: Request):
             resolver = HermesResolver()
         elif req.source == "openclaw":
             resolver = OpenClawResolver()
+        elif req.source == "officialskills":
+            resolver = OfficialSkillsResolver()
         elif req.source == "github":
             if not req.url:
                 raise HTTPException(
@@ -509,10 +571,53 @@ async def install_skill(req: SkillInstallRequest, request: Request):
                 status_code=404,
                 detail=f"Skill '{req.name}' not found in source '{req.source}'",
             )
+        resolved_skill = matches[0]
+
+        if resolved_skill.sidecar_data.get("catalog_only"):
+            catalog_url = str(resolved_skill.sidecar_data.get("url") or req.url or "")
+            github_url = _resolve_catalog_github_url(catalog_url)
+            if "github.com/" not in github_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "This catalog entry does not expose an installable GitHub "
+                        "repository. Open the source link manually."
+                    ),
+                )
+            clone_url, cache_root, subpath = _split_github_repo_url(github_url)
+            cache = Path(f"~/.sunday/skill-cache/catalog/{cache_root}").expanduser()
+            repo_resolver = GitHubResolver(cache_root=cache, repo_url=clone_url)
+            repo_resolver.sync()
+            repo_skills = repo_resolver.list_skills()
+            repo_matches = []
+            if subpath:
+                wanted = subpath.lower().replace("\\", "/")
+                repo_matches = [
+                    s
+                    for s in repo_skills
+                    if s.path.relative_to(cache).as_posix().lower() == wanted
+                    or s.path.relative_to(cache).as_posix().lower().endswith(f"/{wanted}")
+                ]
+            if not repo_matches:
+                leaf = subpath.rstrip("/").rsplit("/", 1)[-1] if subpath else req.name
+                repo_matches = [
+                    s
+                    for s in repo_skills
+                    if s.name == req.name or s.path.name == leaf or s.path.name == req.name
+                ]
+            if not repo_matches:
+                repo_matches = repo_skills
+            if not repo_matches:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"No SKILL.md found in catalog repository: {github_url}",
+                )
+            resolved_skill = repo_matches[0]
+            resolved_skill.source = req.source
 
         importer = SkillImporter(parser=SkillParser(), tool_translator=ToolTranslator())
         result = importer.import_skill(
-            matches[0],
+            resolved_skill,
             with_scripts=req.with_scripts,
             force=req.force,
         )
@@ -560,8 +665,9 @@ async def remove_skill(skill_name: str, request: Request):
 
 
 @skills_router.get("/sources")
-async def list_sources(request: Request):
+async def list_sources(request: Request, response: Response):
     """List configured skill sources."""
+    response.headers["Cache-Control"] = "no-store"
     try:
         sources = []
         for s in _configured_skill_sources():
@@ -580,16 +686,19 @@ async def list_sources(request: Request):
 @skills_router.get("/available")
 async def list_available_skills(
     request: Request,
+    response: Response,
     source: str = "",
     search: str = "",
     category: str = "",
 ):
     """List available skills from sources."""
+    response.headers["Cache-Control"] = "no-store"
     try:
         from pathlib import Path
 
         from sunday.skills.sources.github import GitHubResolver
         from sunday.skills.sources.hermes import HermesResolver
+        from sunday.skills.sources.officialskills import OfficialSkillsResolver
         from sunday.skills.sources.openclaw import OpenClawResolver
 
         skills = []
@@ -613,6 +722,8 @@ async def list_available_skills(
                 resolver = HermesResolver()
             elif src_cfg.source == "openclaw":
                 resolver = OpenClawResolver()
+            elif src_cfg.source == "officialskills":
+                resolver = OfficialSkillsResolver()
             elif src_cfg.source == "github":
                 if not src_cfg.url:
                     continue
@@ -665,6 +776,7 @@ async def sync_skills(
         from sunday.skills.parser import SkillParser
         from sunday.skills.sources.github import GitHubResolver
         from sunday.skills.sources.hermes import HermesResolver
+        from sunday.skills.sources.officialskills import OfficialSkillsResolver
         from sunday.skills.sources.openclaw import OpenClawResolver
         from sunday.skills.tool_translator import ToolTranslator
 
@@ -694,6 +806,8 @@ async def sync_skills(
                 resolver = HermesResolver()
             elif src.source == "openclaw":
                 resolver = OpenClawResolver()
+            elif src.source == "officialskills":
+                resolver = OfficialSkillsResolver()
             elif src.source == "github":
                 if not src.url:
                     continue

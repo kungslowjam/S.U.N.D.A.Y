@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -228,6 +229,99 @@ class SkillManager:
                 if inp or out:
                     examples.append(f"### {name}\nInput: {inp}\nOutput: {out}")
         return examples
+
+    def select_relevant_playbooks(
+        self,
+        query: str,
+        *,
+        limit: int = 1,
+        max_chars_per_skill: int = 1400,
+    ) -> List[Dict[str, str]]:
+        """Return likely matching SKILL.md playbooks for Codex-style injection.
+
+        This keeps the OpenJarvis contract (every skill is still a tool) while
+        adding Codex-style behavior for instruction-only skills: the most
+        relevant playbooks are loaded into the agent prompt before the model
+        decides which tools to use.
+        """
+        query_l = query.lower()
+        query_terms = {
+            term
+            for term in re.findall(r"[a-zA-Z0-9_\-]+", query_l)
+            if len(term) >= 3
+        }
+        scored: List[tuple[int, str, SkillManifest]] = []
+
+        for manifest in self._skills.values():
+            if manifest.disable_model_invocation or not manifest.markdown_content:
+                continue
+
+            haystack = " ".join(
+                [
+                    manifest.name,
+                    manifest.description or "",
+                    " ".join(manifest.tags or []),
+                    manifest.markdown_content[:1200],
+                ]
+            ).lower()
+            score = 0
+            for term in query_terms:
+                if term in haystack:
+                    score += 3 if term in manifest.name.lower() else 1
+
+            if any(
+                phrase in query_l
+                for phrase in (
+                    "research paper",
+                    "reseach paper",
+                    "paper",
+                    "arxiv",
+                    "academic",
+                    "literature",
+                    "วิจัย",
+                    "บทความ",
+                    "เปเปอร์",
+                )
+            ):
+                if any(k in haystack for k in ("arxiv", "research", "paper")):
+                    score += 8
+
+            if any(
+                phrase in query_l
+                for phrase in (
+                    "find",
+                    "search",
+                    "lookup",
+                    "หา",
+                    "ค้น",
+                    "ค้นหา",
+                )
+            ) and any(
+                phrase in query_l
+                for phrase in ("paper", "research", "วิจัย", "บทความ", "เปเปอร์")
+            ):
+                if "arxiv" in haystack:
+                    score += 12
+                if "writing" in haystack or "write " in haystack:
+                    score -= 10
+
+            if score > 0:
+                scored.append((score, manifest.name, manifest))
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        playbooks: List[Dict[str, str]] = []
+        for _, _, manifest in scored[:limit]:
+            content = manifest.markdown_content.strip()
+            if len(content) > max_chars_per_skill:
+                content = content[:max_chars_per_skill].rstrip() + "\n\n[Skill truncated]"
+            playbooks.append(
+                {
+                    "name": manifest.name,
+                    "description": manifest.description or manifest.name,
+                    "content": content,
+                }
+            )
+        return playbooks
 
     # ------------------------------------------------------------------
     # Trace-driven skill discovery (Plan 2A)

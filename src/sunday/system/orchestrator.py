@@ -158,6 +158,14 @@ class QueryOrchestrator:
             examples = getattr(s, "_skill_few_shot_examples", None)
             if examples:
                 agent_kwargs["skill_few_shot_examples"] = examples
+            skill_manager = getattr(s, "skill_manager", None)
+            if skill_manager is not None:
+                try:
+                    playbooks = skill_manager.select_relevant_playbooks(query)
+                    if playbooks:
+                        agent_kwargs["skill_playbooks"] = playbooks
+                except Exception:
+                    logger.debug("Skill playbook selection failed", exc_info=True)
         if system_prompt is not None:
             agent_kwargs["system_prompt"] = system_prompt
         if s.capability_policy is not None:

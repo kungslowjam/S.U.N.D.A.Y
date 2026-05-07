@@ -43,22 +43,22 @@ function CodeBlockPre({ children, ...props }: any) {
   };
 
   return (
-    <div className="code-block-wrapper relative my-4" style={{ borderRadius: 'var(--radius-md)', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+    <div className="code-block-wrapper relative my-4" style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
       <div
         className="flex items-center justify-between px-4 py-2 text-xs"
-        style={{ background: 'var(--color-code-bg)', color: 'var(--color-text-tertiary)' }}
+        style={{ background: 'rgba(30, 30, 30, 0.8)', color: '#9ca3af' }}
       >
         <span className="font-mono text-[11px]">{lang || 'code'}</span>
         <button
           onClick={handleCopy}
           className="flex items-center gap-1.5 px-2 py-1 rounded-md transition-colors cursor-pointer text-xs"
-          style={{ color: 'var(--color-text-tertiary)' }}
+          style={{ color: '#9ca3af' }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.color = 'var(--color-text)';
-            e.currentTarget.style.background = 'var(--color-bg-tertiary)';
+            e.currentTarget.style.color = '#e5e7eb';
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = 'var(--color-text-tertiary)';
+            e.currentTarget.style.color = '#9ca3af';
             e.currentTarget.style.background = 'transparent';
           }}
         >
@@ -66,7 +66,7 @@ function CodeBlockPre({ children, ...props }: any) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre {...props} style={{ margin: 0, borderRadius: 0, background: 'var(--color-code-bg)' }}>
+      <pre {...props} style={{ margin: 0, borderRadius: 0, background: 'rgba(20, 20, 20, 0.9)' }}>
         {children}
       </pre>
     </div>
@@ -85,15 +85,15 @@ function CopyMessageButton({ content }: { content: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-      style={{ color: 'var(--color-text-tertiary)' }}
+      className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+      style={{ color: '#9ca3af' }}
       title="Copy message"
       onMouseEnter={(e) => {
-        e.currentTarget.style.color = 'var(--color-text)';
-        e.currentTarget.style.background = 'var(--color-bg-secondary)';
+        e.currentTarget.style.color = '#60a5f9';
+        e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)';
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.color = 'var(--color-text-tertiary)';
+        e.currentTarget.style.color = '#9ca3af';
         e.currentTarget.style.background = 'transparent';
       }}
     >
@@ -117,15 +117,15 @@ function SpeakMessageButton({ content }: { content: string }) {
   return (
     <button
       onClick={handleSpeak}
-      className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-      style={{ color: 'var(--color-text-tertiary)' }}
+      className="p-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all cursor-pointer"
+      style={{ color: '#9ca3af' }}
       title="Speak message"
       onMouseEnter={(e) => {
-        e.currentTarget.style.color = 'var(--color-text)';
-        e.currentTarget.style.background = 'var(--color-bg-secondary)';
+        e.currentTarget.style.color = '#60a5f9';
+        e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)';
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.color = 'var(--color-text-tertiary)';
+        e.currentTarget.style.color = '#9ca3af';
         e.currentTarget.style.background = 'transparent';
       }}
     >
@@ -139,15 +139,16 @@ export function MessageBubble({ message }: Props) {
 
   if (isUser) {
     return (
-      <div className="flex justify-end mb-8">
+      <div className="flex justify-end mb-6">
         <div
-          className="max-w-[80%] px-5 py-3.5 text-sm leading-relaxed"
+          className="max-w-[85%] px-5 py-3.5 text-sm leading-relaxed"
           style={{
-            background: 'var(--color-user-bubble)',
-            color: 'var(--color-user-bubble-text)',
+            background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+            color: 'white',
             borderRadius: '1.25rem',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
+            boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
           }}
         >
           {message.content}
@@ -159,7 +160,7 @@ export function MessageBubble({ message }: Props) {
   const cleanContent = useMemo(() => stripThinkTags(message.content), [message.content]);
 
   return (
-    <div className="group mb-8">
+    <div className="group mb-6">
       <div className="flex-1 min-w-0">
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="mb-4 flex flex-col gap-2">
@@ -172,7 +173,7 @@ export function MessageBubble({ message }: Props) {
         {message.audio?.url && <AudioPlayer src={message.audio.url} />}
 
         {cleanContent && (
-          <div className="prose max-w-none">
+          <div className="prose max-w-none" style={{ color: '#e5e7eb' }}>
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkMath]}
               rehypePlugins={[[rehypeHighlight, { detect: true }], rehypeKatex]}
@@ -183,7 +184,7 @@ export function MessageBubble({ message }: Props) {
           </div>
         )}
 
-        <div className="flex items-center gap-2 mt-2">
+        <div className="flex items-center gap-2 mt-3">
           <SpeakMessageButton content={cleanContent} />
           <CopyMessageButton content={cleanContent} />
         </div>

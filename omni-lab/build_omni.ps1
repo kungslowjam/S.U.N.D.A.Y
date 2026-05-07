@@ -176,8 +176,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "CMake configure failed. Try running from Developer PowerShell for Visual Studio."
 }
 
-Write-Host "[BUILD] llama-omni-cli" -ForegroundColor Cyan
-cmake --build $BuildDir --target llama-omni-cli --config Release -j
+Write-Host "[BUILD] llama-omni-cli + duplex test" -ForegroundColor Cyan
+cmake --build $BuildDir --target llama-omni-cli llama-omni-test-duplex --config Release -j
 if ($LASTEXITCODE -ne 0) {
     throw "Build failed."
 }

@@ -273,7 +273,17 @@ class ToolExecutor:
 
         # Emit end event
         if self._bus:
-            result_text = str(result.content)[:10240] if result.content else ""
+            if (
+                result.metadata.get("skill_kind") == "instructional"
+                or result.tool_name.startswith("skill_")
+                and result.metadata.get("steps", 0) == 0
+            ):
+                result_text = (
+                    f"Loaded instructional skill "
+                    f"`{result.metadata.get('skill', result.tool_name)}`."
+                )
+            else:
+                result_text = str(result.content)[:10240] if result.content else ""
             # Pass through ToolResult.metadata so downstream consumers
             # (TraceCollector → TraceStep.metadata → SkillOptimizer) can
             # see skill-tagged invocations.  Filter to JSON-serializable

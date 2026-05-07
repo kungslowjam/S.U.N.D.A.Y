@@ -32,12 +32,25 @@ OPENHANDS_SYSTEM_PROMPT = (  # noqa: E501
     "Action Input: <json_arguments>\n\n"
     "You will receive the result, then continue your "
     "response.\n\n"
+    "## How to use skills\n\n"
+    "Tools whose names begin with `skill_` are SKILLS. Skills are reusable "
+    "playbooks or pipelines for specific tasks. When a user request matches "
+    "a skill description, call the matching `skill_*` tool before using "
+    "generic tools. If the skill returns markdown instructions, read them "
+    "as your playbook, then follow those instructions using the other tools. "
+    "Do not call the same instructional skill repeatedly in the same turn.\n\n"
+    "Prefer skills for domain workflows such as academic paper search, "
+    "research synthesis, code explanation, data analysis, file creation, "
+    "and other tasks where a matching skill exists. Use generic tools like "
+    "`web_search` only when no matching skill exists or when the skill "
+    "instructs you to search.\n\n"
     "## Available tools\n\n"
     "{tool_descriptions}\n\n"
+    "{skill_examples}"
     "## Important rules\n\n"
     "- When the user asks you to look up, search, fetch, "
-    "or summarize a URL or topic, you MUST use web_search. "
-    "Do NOT say you cannot browse the web.\n"
+    "or summarize a URL or topic, use a matching `skill_*` first when one "
+    "exists; otherwise use web_search. Do NOT say you cannot browse the web.\n"
     "- When the user provides a URL, pass the FULL URL "
     "(including https://) as the query to web_search. "
     "Do NOT rewrite URLs into search keywords.\n"
@@ -74,6 +87,8 @@ class NativeOpenHandsAgent(ToolUsingAgent):
         max_tokens: Optional[int] = None,
         interactive: bool = False,
         confirm_callback=None,
+        skill_few_shot_examples: Optional[List[str]] = None,
+        skill_playbooks: Optional[List[dict[str, str]]] = None,
     ) -> None:
         super().__init__(
             engine,
@@ -85,7 +100,9 @@ class NativeOpenHandsAgent(ToolUsingAgent):
             max_tokens=max_tokens,
             interactive=interactive,
             confirm_callback=confirm_callback,
+            skill_few_shot_examples=skill_few_shot_examples,
         )
+        self._skill_playbooks = list(skill_playbooks or [])
 
     @staticmethod
     def _expand_urls(text: str) -> tuple[str, bool]:
@@ -137,6 +154,96 @@ class NativeOpenHandsAgent(ToolUsingAgent):
                 break
         return messages
 
+    def _build_relevant_skill_hints(self, user_input: str, limit: int = 6) -> str:
+        """Surface likely matching skills near the top of the prompt.
+
+        The complete tool list can be long. A compact relevance hint makes it
+        much easier for small local models to pick a `skill_*` tool before
+        falling back to generic tools such as web_search.
+        """
+        skill_specs = [
+            tool.spec
+            for tool in self._tools
+            if tool.spec.category == "skill" or tool.spec.name.startswith("skill_")
+        ]
+        if not skill_specs:
+            return ""
+
+        query = user_input.lower()
+        query_terms = {
+            term
+            for term in re.findall(r"[a-zA-Z0-9_\-]+", query)
+            if len(term) >= 3
+        }
+        scored: list[tuple[int, str, str]] = []
+
+        for spec in skill_specs:
+            haystack = f"{spec.name} {spec.description}".lower()
+            score = 0
+            for term in query_terms:
+                if term in haystack:
+                    score += 2 if term in spec.name.lower() else 1
+
+            # Common academic/research requests should strongly consider
+            # academic skills before generic web search.
+            if any(
+                phrase in query
+                for phrase in (
+                    "research paper",
+                    "reseach paper",
+                    "paper",
+                    "arxiv",
+                    "academic",
+                    "literature",
+                    "วิจัย",
+                    "บทความ",
+                    "เปเปอร์",
+                )
+            ):
+                if any(k in haystack for k in ("arxiv", "research", "paper")):
+                    score += 6
+
+            if score > 0:
+                scored.append((score, spec.name, spec.description))
+
+        if not scored:
+            return ""
+
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        lines = [
+            "## Relevant skills for this request",
+            "Prefer these skills before generic tools when they match:",
+        ]
+        for _, name, desc in scored[:limit]:
+            lines.append(f"- {name}: {desc}")
+        return "\n".join(lines) + "\n\n"
+
+    def _build_skill_playbooks_block(self) -> str:
+        if not self._skill_playbooks:
+            return ""
+
+        lines = [
+            "## Active Skill Playbooks",
+            "The following skills were selected for this request. Treat them as "
+            "task-specific instructions. Follow the matching playbook using your "
+            "normal tools. Only call `skill_*` directly when you need a pipeline "
+            "result or the playbook explicitly tells you to.",
+        ]
+        for skill in self._skill_playbooks:
+            name = skill.get("name", "unknown-skill")
+            desc = skill.get("description", name)
+            content = skill.get("content", "").strip()
+            lines.extend(
+                [
+                    "",
+                    f"### {name}",
+                    desc,
+                    "",
+                    content,
+                ]
+            )
+        return "\n".join(lines) + "\n\n"
+
     @staticmethod
     def _strip_tool_call_text(text: str) -> str:
         """Remove raw tool call artifacts from final output."""
@@ -150,6 +257,73 @@ class NativeOpenHandsAgent(ToolUsingAgent):
         # Remove <tool_call>...</tool_call> or </tool_name> blocks
         text = re.sub(r"<tool_call>.*?</\w+>", "", text, flags=re.DOTALL)
         return text.strip()
+
+    @staticmethod
+    def _tool_observation_text(tool_result: ToolResult) -> str:
+        """Return compact text to feed back into the model after a tool call.
+
+        Instruction-only skills often return a whole ``SKILL.md``. In
+        Codex-first mode that playbook is already injected into the system
+        prompt, so repeating it as an observation can overflow small local
+        GGUF context windows before the next turn.
+        """
+        metadata = tool_result.metadata or {}
+        if (
+            metadata.get("skill_kind") == "instructional"
+            or str(tool_result.tool_name).startswith("skill_")
+            and metadata.get("steps", 0) == 0
+        ):
+            skill_name = metadata.get("skill") or tool_result.tool_name.replace(
+                "skill_",
+                "",
+                1,
+            )
+            task = ""
+            args = metadata.get("arguments")
+            if isinstance(args, dict):
+                task = str(args.get("task") or "").strip()
+            suffix = f" Task: {task}" if task else ""
+            search_hint = ""
+            if skill_name == "arxiv":
+                search_query = task or "academic research papers"
+                search_hint = (
+                    " Next, call exactly one academic search tool first, "
+                    "preferably OpenAlex because it has broad scholarly "
+                    "coverage and no API key requirement:\n"
+                    "Action: openalex_search\n"
+                    f"Action Input: {{\"query\": \"{search_query}\", "
+                    "\"limit\": 5, \"start_year\": 2024, "
+                    "\"end_year\": 2026}}\n"
+                    "Use arxiv_search as fallback if OpenAlex finds nothing. "
+                    "Use generic web_search only as the last fallback. "
+                    "After searching, summarize 5 papers with years and links."
+                )
+            return (
+                f"Skill `{skill_name}` is active. Use its playbook already "
+                f"provided in the system prompt, then continue with the "
+                f"appropriate concrete tools.{suffix}{search_hint}"
+            )
+
+        obs_text = tool_result.content
+        if tool_result.tool_name in {
+            "web_search",
+            "openalex_search",
+            "semantic_scholar_search",
+            "arxiv_search",
+        }:
+            if len(obs_text) > 1200:
+                obs_text = obs_text[:1200] + "\n\n[Search results truncated]"
+            return (
+                f"{obs_text}\n\n"
+                "Now answer the user directly in Thai. Do not describe your "
+                "reasoning process or mention what you plan to do. Include "
+                "only useful results, dates, and links from the search output. "
+                "If results are weak, say that clearly and suggest better "
+                "academic search terms."
+            )
+        if len(obs_text) > 2000:
+            obs_text = obs_text[:2000] + "\n\n[Output truncated]"
+        return obs_text
 
     def _extract_code(self, text: str) -> str | None:
         """Extract Python code from markdown code blocks."""
@@ -215,6 +389,53 @@ class NativeOpenHandsAgent(ToolUsingAgent):
 
         return None
 
+    def _supports_native_tool_schema(self) -> bool:
+        """Return whether this backend should receive OpenAI tool schemas.
+
+        llama.cpp accepts parts of the OpenAI-compatible API, but local GGUF
+        models frequently return 400 for large or unsupported `tools` schemas.
+        NativeOpenHands already includes text tool instructions in the prompt,
+        so local llama.cpp should use the Action/Action Input fallback instead.
+        """
+        engine_id = getattr(self._engine, "engine_id", "")
+        inner = self._engine
+        while hasattr(inner, "_inner"):
+            inner = getattr(inner, "_inner")
+            engine_id = getattr(inner, "engine_id", engine_id)
+        if engine_id in {"llamacpp", "mlx", "lmstudio"}:
+            return False
+        if str(self._model).lower().endswith(".gguf"):
+            return False
+        return True
+
+    def _is_local_gguf_backend(self) -> bool:
+        return not self._supports_native_tool_schema()
+
+    def _select_prompt_tools(self, playbooks: list[dict[str, str]]) -> list[BaseTool]:
+        """Keep local prompts small by listing only useful skill tools.
+
+        The full installed skill catalog can be dozens or hundreds of entries.
+        Local GGUF models with small context windows can reject that prompt with
+        HTTP 400 before generation starts. Codex-first mode already injects the
+        selected SKILL.md playbooks, so we only need to list normal tools plus
+        skill tools matching those selected playbooks.
+        """
+        if not self._is_local_gguf_backend():
+            return self._tools
+
+        selected_skill_tools = {
+            f"skill_{skill.get('name', '').strip()}"
+            for skill in playbooks
+            if skill.get("name")
+        }
+        prompt_tools: list[BaseTool] = []
+        for tool in self._tools:
+            spec = tool.spec
+            is_skill = spec.category == "skill" or spec.name.startswith("skill_")
+            if not is_skill or spec.name in selected_skill_tools:
+                prompt_tools.append(tool)
+        return prompt_tools
+
     def run(
         self,
         input: str,
@@ -223,13 +444,38 @@ class NativeOpenHandsAgent(ToolUsingAgent):
     ) -> AgentResult:
         self._emit_turn_start(input)
 
-        tool_descriptions = build_tool_descriptions(self._tools)
+        playbooks = list(self._skill_playbooks)
+        prompt_tools = self._select_prompt_tools(playbooks)
+        tool_descriptions = build_tool_descriptions(prompt_tools)
+        if self._skill_few_shot_examples:
+            skill_examples_block = (
+                "## Skill Examples\n\n"
+                + "\n\n".join(self._skill_few_shot_examples)
+                + "\n\n"
+            )
+        else:
+            skill_examples_block = ""
         prompt_template = (
             load_system_prompt_override("native_openhands") or OPENHANDS_SYSTEM_PROMPT
         )
-        system_prompt = prompt_template.format(
-            tool_descriptions=tool_descriptions,
-        )
+        try:
+            system_prompt = prompt_template.format(
+                tool_descriptions=tool_descriptions,
+                skill_examples=skill_examples_block,
+            )
+        except KeyError:
+            system_prompt = prompt_template.format(
+                tool_descriptions=tool_descriptions,
+            )
+            if skill_examples_block:
+                system_prompt += "\n\n" + skill_examples_block
+
+        skill_hints = self._build_relevant_skill_hints(input)
+        if skill_hints:
+            system_prompt = system_prompt + "\n\n" + skill_hints
+        skill_playbooks = self._build_skill_playbooks_block()
+        if skill_playbooks:
+            system_prompt = system_prompt + "\n\n" + skill_playbooks
 
         # Pre-fetch any URLs in the input so the LLM gets the content directly
         input, url_expanded = self._expand_urls(input)
@@ -288,7 +534,11 @@ class NativeOpenHandsAgent(ToolUsingAgent):
         total_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         # Build OpenAI-format tool schemas for native function calling
-        openai_tools = self._executor.get_openai_tools() if self._tools else []
+        openai_tools = (
+            self._executor.get_openai_tools()
+            if self._tools and self._supports_native_tool_schema()
+            else []
+        )
         # Side dict for Gemini thought_signatures (ToolCall uses slots)
         _thought_sigs: dict[str, bytes] = {}
 
@@ -345,9 +595,7 @@ class NativeOpenHandsAgent(ToolUsingAgent):
                 for tc in native_calls:
                     tool_result = self._executor.execute(tc)
                     all_tool_results.append(tool_result)
-                    obs_text = tool_result.content
-                    if len(obs_text) > 4000:
-                        obs_text = obs_text[:4000] + "\n\n[Output truncated]"
+                    obs_text = self._tool_observation_text(tool_result)
                     messages.append(
                         Message(
                             role=Role.TOOL,
@@ -374,9 +622,7 @@ class NativeOpenHandsAgent(ToolUsingAgent):
                 tool_result = self._executor.execute(tool_call)
                 all_tool_results.append(tool_result)
 
-                obs_text = tool_result.content
-                if len(obs_text) > 4000:
-                    obs_text = obs_text[:4000] + "\n\n[Output truncated]"
+                obs_text = self._tool_observation_text(tool_result)
                 observation = f"Output:\n{obs_text}"
                 messages.append(Message(role=Role.USER, content=observation))
                 continue
@@ -393,9 +639,7 @@ class NativeOpenHandsAgent(ToolUsingAgent):
                 tool_result = self._executor.execute(tool_call)
                 all_tool_results.append(tool_result)
 
-                obs_text = tool_result.content
-                if len(obs_text) > 4000:
-                    obs_text = obs_text[:4000] + "\n\n[Output truncated]"
+                obs_text = self._tool_observation_text(tool_result)
                 observation = f"Result: {obs_text}"
                 messages.append(Message(role=Role.USER, content=observation))
                 continue

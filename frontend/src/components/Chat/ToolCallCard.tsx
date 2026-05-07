@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle, Sparkles, Wrench } from 'lucide-react';
 import type { ToolCallInfo } from '../../types';
 
 interface Props {
@@ -12,7 +12,18 @@ const statusConfig = {
   error: { icon: XCircle, color: 'var(--color-error)' },
 };
 
-function previewArgs(raw: string): string {
+function toDisplayString(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function previewArgs(value: unknown): string {
+  const raw = toDisplayString(value);
   if (!raw) return '';
   try {
     const parsed = JSON.parse(raw);
@@ -35,6 +46,8 @@ export function ToolCallCard({ toolCall }: Props) {
   const [expanded, setExpanded] = useState(false);
   const config = statusConfig[toolCall.status];
   const StatusIcon = config.icon;
+  const KindIcon = toolCall.kind === 'skill' ? Sparkles : Wrench;
+  const kindLabel = toolCall.kind === 'skill' ? 'Skill' : 'Tool';
   const preview = previewArgs(toolCall.arguments);
 
   return (
@@ -62,6 +75,22 @@ export function ToolCallCard({ toolCall }: Props) {
           style={{ color: config.color, flexShrink: 0 }}
           className={toolCall.status === 'running' ? 'animate-spin' : ''}
         />
+        <span
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5"
+          style={{
+            background: toolCall.kind === 'skill'
+              ? 'rgba(139, 92, 246, 0.16)'
+              : 'rgba(59, 130, 246, 0.12)',
+            color: toolCall.kind === 'skill'
+              ? 'rgb(196, 181, 253)'
+              : 'var(--color-accent)',
+            fontSize: 10,
+            flexShrink: 0,
+          }}
+        >
+          <KindIcon size={10} />
+          {kindLabel}
+        </span>
         <span
           style={{ color: 'var(--color-text)', fontWeight: 500, flexShrink: 0 }}
         >
@@ -149,7 +178,7 @@ export function ToolCallCard({ toolCall }: Props) {
                   wordBreak: 'break-word',
                 }}
               >
-                {toolCall.result}
+                {toDisplayString(toolCall.result)}
               </pre>
             </div>
           )}
@@ -159,10 +188,11 @@ export function ToolCallCard({ toolCall }: Props) {
   );
 }
 
-function formatJson(raw: string): string {
+function formatJson(raw: unknown): string {
+  const text = toDisplayString(raw);
   try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
+    return JSON.stringify(JSON.parse(text), null, 2);
   } catch {
-    return raw;
+    return text;
   }
 }
