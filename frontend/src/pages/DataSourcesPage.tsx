@@ -22,6 +22,17 @@ import {
   Package, Upload, Link2, PhoneCall,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import {
+  siApple,
+  siDropbox,
+  siGmail,
+  siGooglecalendar,
+  siGoogledrive,
+  siGooglemessages,
+  siNotion,
+  siObsidian,
+  siWhatsapp,
+} from 'simple-icons/icons';
 import { SOURCE_CATALOG } from '../types/connectors';
 import type { ConnectRequest } from '../types/connectors';
 import { listConnectors, connectSource, getSyncStatus, triggerSync } from '../lib/connectors-api';
@@ -310,6 +321,132 @@ const iconMap: Record<string, LucideIcon> = {
 const IconFor = ({ id, size = 18 }: { id: string; size?: number }) => {
   const Ico = iconMap[id] ?? Link2;
   return <Ico size={size} />;
+};
+
+const logoMap: Record<string, {
+  bg: string;
+  fg: string;
+  image?: string;
+  label?: string;
+  icon?: LucideIcon;
+  brand?: { path: string; title: string; hex: string };
+  accents?: string[];
+}> = {
+  upload: { bg: '#1f2937', fg: '#dbeafe', image: '/logos/data-sources/upload.svg', icon: Upload },
+  gmail_imap: { bg: '#ffffff', fg: `#${siGmail.hex}`, image: '/logos/data-sources/gmail.svg', brand: siGmail },
+  gmail: { bg: '#ffffff', fg: `#${siGmail.hex}`, image: '/logos/data-sources/gmail.svg', brand: siGmail },
+  slack: { bg: '#ffffff', fg: '#4a154b', image: '/logos/data-sources/slack.png', label: '#', accents: ['#36c5f0', '#2eb67d', '#ecb22e', '#e01e5a'] },
+  notion: { bg: '#ffffff', fg: `#${siNotion.hex}`, image: '/logos/data-sources/notion.png', brand: siNotion },
+  granola: { bg: '#fff7ed', fg: '#d97706', image: '/logos/data-sources/granola.png', label: 'G' },
+  imessage: { bg: '#ecfdf5', fg: `#${siGooglemessages.hex}`, image: '/logos/data-sources/imessage.png', brand: siGooglemessages },
+  whatsapp: { bg: '#ecfdf5', fg: `#${siWhatsapp.hex}`, image: '/logos/data-sources/whatsapp.png', brand: siWhatsapp },
+  obsidian: { bg: '#f5f3ff', fg: `#${siObsidian.hex}`, image: '/logos/data-sources/obsidian.png', brand: siObsidian },
+  gdrive: { bg: '#ffffff', fg: `#${siGoogledrive.hex}`, image: '/logos/data-sources/gdrive.png', brand: siGoogledrive },
+  gcalendar: { bg: '#ffffff', fg: `#${siGooglecalendar.hex}`, image: '/logos/data-sources/gcalendar.png', brand: siGooglecalendar },
+  gcontacts: { bg: '#eef6ff', fg: '#1a73e8', image: '/logos/data-sources/gcontacts.png', icon: Contact },
+  apple_notes: { bg: '#ffffff', fg: `#${siApple.hex}`, image: '/logos/data-sources/apple_notes.png', brand: siApple, accents: ['#facc15'] },
+  apple_contacts: { bg: '#ffffff', fg: `#${siApple.hex}`, image: '/logos/data-sources/apple_contacts.png', brand: siApple, accents: ['#f97316'] },
+  outlook: { bg: '#eff6ff', fg: '#0078d4', image: '/logos/data-sources/outlook.png', label: 'O' },
+  dropbox: { bg: '#eff6ff', fg: `#${siDropbox.hex}`, image: '/logos/data-sources/dropbox.png', brand: siDropbox },
+  apple_health: { bg: '#ffffff', fg: '#ff2d55', image: '/logos/data-sources/apple_health.svg', icon: Contact },
+  apple_music: { bg: '#ffffff', fg: '#fa243c', image: '/logos/data-sources/apple_music.svg', icon: MessageCircle },
+  github_notifications: { bg: '#ffffff', fg: '#181717', image: '/logos/data-sources/github_notifications.svg', icon: Hash },
+  google_tasks: { bg: '#ffffff', fg: '#2684fc', image: '/logos/data-sources/google_tasks.svg', icon: CalendarDays },
+  hackernews: { bg: '#ffffff', fg: '#f0652f', image: '/logos/data-sources/hackernews.svg', label: 'Y' },
+  news_rss: { bg: '#fff7ed', fg: '#f97316', image: '/logos/data-sources/news_rss.svg', icon: Hash },
+  oura: { bg: '#ffffff', fg: '#111827', image: '/logos/data-sources/oura.png', icon: Contact },
+  spotify: { bg: '#ecfdf5', fg: '#1ed760', image: '/logos/data-sources/spotify.svg', icon: MessageCircle },
+  strava: { bg: '#fff7ed', fg: '#fc4c02', image: '/logos/data-sources/strava.svg', icon: Upload },
+  weather: { bg: '#eff6ff', fg: '#2563eb', image: '/logos/data-sources/weather.svg', icon: CalendarDays },
+};
+
+const SourceLogo = ({ id, size = 38 }: { id: string; size?: number }) => {
+  const [imageFailed, setImageFailed] = useState(false);
+  const logo = logoMap[id];
+  const Ico = logo?.icon;
+
+  if (!logo) {
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: 10,
+        display: 'grid', placeItems: 'center',
+        background: 'var(--color-bg-tertiary)',
+        color: 'var(--color-text-secondary)',
+        border: '1px solid var(--color-border)',
+        flexShrink: 0,
+      }}>
+        <IconFor id={id} size={18} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: 10,
+      position: 'relative',
+      display: 'grid', placeItems: 'center',
+      background: logo.bg,
+      color: logo.fg,
+      border: '1px solid color-mix(in srgb, var(--color-border) 75%, transparent)',
+      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.35)',
+      flexShrink: 0,
+      overflow: 'hidden',
+    }}>
+      {logo.accents && (
+        <div style={{
+          position: 'absolute',
+          left: 0, right: 0, bottom: 0,
+          height: 4,
+          display: 'grid',
+          gridTemplateColumns: `repeat(${logo.accents.length}, 1fr)`,
+        }}>
+          {logo.accents.map((color) => (
+            <span key={color} style={{ background: color }} />
+          ))}
+        </div>
+      )}
+      {logo.image && !imageFailed ? (
+        <img
+          src={logo.image}
+          alt=""
+          aria-hidden="true"
+          style={{
+            width: 22,
+            height: 22,
+            objectFit: 'contain',
+            display: 'block',
+          }}
+          onError={(event) => {
+            event.currentTarget.style.display = 'none';
+            setImageFailed(true);
+          }}
+        />
+      ) : logo.brand ? (
+        <svg
+          aria-label={logo.brand.title}
+          role="img"
+          viewBox="0 0 24 24"
+          width={20}
+          height={20}
+          fill="currentColor"
+        >
+          <path d={logo.brand.path} />
+        </svg>
+      ) : Ico ? (
+        <Ico size={18} strokeWidth={2.2} />
+      ) : (
+        <span style={{
+          fontSize: logo.label && logo.label.length > 1 ? 12 : 18,
+          lineHeight: 1,
+          fontWeight: 800,
+          letterSpacing: 0,
+          fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+        }}>
+          {logo.label}
+        </span>
+      )}
+    </div>
+  );
 };
 
 // ---------------------------------------------------------------------------
@@ -661,6 +798,7 @@ function DataSourcesSection() {
                   padding: '14px 18px',
                   display: 'flex', alignItems: 'center', gap: 14,
                 }}>
+                  <SourceLogo id={c.connector_id} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="font-semibold" style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>
                       {c.display_name}
@@ -765,6 +903,7 @@ function DataSourcesSection() {
                   }}
                   onClick={() => setExpandedId(isExpanded ? null : c.connector_id)}
                 >
+                  <SourceLogo id={c.connector_id} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div className="font-semibold" style={{ fontSize: 14, fontWeight: 600, color: 'var(--color-text)' }}>
                       {c.display_name}

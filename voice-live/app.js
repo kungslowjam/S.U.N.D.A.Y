@@ -1,6 +1,8 @@
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+const DEFAULT_VOICE_LLM_ENDPOINT = "http://127.0.0.1:8082/v1/chat/completions";
 const DEFAULT_AGENT_ENDPOINT = "http://127.0.0.1:8000/v1/voice/turn";
-const DEFAULT_FAST_FALLBACK = "http://127.0.0.1:8082/v1/chat/completions";
+const SETTINGS_VERSION = "fast-voice-v5";
+const DEFAULT_STT_MODEL = "base";
 
 const state = {
   live: false,
@@ -11,6 +13,7 @@ const state = {
   aborter: null,
   speechQueue: [],
   currentAudio: null,
+  routeMode: "live",
   mediaStream: null,
   mediaRecorder: null,
   recordingChunks: [],
@@ -22,6 +25,9 @@ const state = {
   localSpeechActive: false,
   localTranscribing: false,
   recordingStartedAt: 0,
+  lastUtteranceStartedAt: 0,
+  lastSttStartedAt: 0,
+  lastSttEndedAt: 0,
   history: [
     {
       role: "system",
@@ -48,6 +54,9 @@ const els = {
   conversation: document.getElementById("conversation"),
   latency: document.getElementById("latencyText"),
   turn: document.getElementById("turnText"),
+  liveMode: document.getElementById("liveModeBtn"),
+  agentMode: document.getElementById("agentModeBtn"),
+  routeHint: document.getElementById("routeHint"),
 };
 
 let recognition = null;
@@ -60,28 +69,28 @@ let vadCooldownUntil = 0;
 
 const MODES = {
   quick: {
-    silenceMs: 560,
-    maxTokens: 140,
+    silenceMs: 420,
+    maxTokens: 64,
     temperature: 0.35,
     topP: 0.78,
-    minSpeakChars: 34,
+    minSpeakChars: 28,
     speechRate: 1.08,
-    startThreshold: 0.038,
-    stopThreshold: 0.017,
-    minRecordMs: 850,
-    maxRecordMs: 4600,
+    startThreshold: 0.036,
+    stopThreshold: 0.018,
+    minRecordMs: 620,
+    maxRecordMs: 3800,
   },
   balanced: {
-    silenceMs: 760,
-    maxTokens: 190,
+    silenceMs: 520,
+    maxTokens: 80,
     temperature: 0.45,
     topP: 0.82,
-    minSpeakChars: 54,
+    minSpeakChars: 36,
     speechRate: 1.03,
-    startThreshold: 0.038,
-    stopThreshold: 0.016,
-    minRecordMs: 1050,
-    maxRecordMs: 6200,
+    startThreshold: 0.036,
+    stopThreshold: 0.018,
+    minRecordMs: 760,
+    maxRecordMs: 4800,
   },
 };
 
@@ -93,8 +102,35 @@ function settings() {
   return MODES[els.mode.value] || MODES.balanced;
 }
 
+function requestOptions() {
+  const base = settings();
+  if (state.routeMode === "agent") {
+    return {
+      ...base,
+      maxTokens: Math.max(base.maxTokens, 220),
+      temperature: 0.35,
+      topP: 0.78,
+    };
+  }
+  return base;
+}
+
+function setRouteMode(mode, persist = true) {
+  state.routeMode = mode === "agent" ? "agent" : "live";
+  els.liveMode.classList.toggle("active", state.routeMode === "live");
+  els.agentMode.classList.toggle("active", state.routeMode === "agent");
+  els.endpoint.value = state.routeMode === "live" ? DEFAULT_VOICE_LLM_ENDPOINT : DEFAULT_AGENT_ENDPOINT;
+  els.fallbackEndpoint.value = state.routeMode === "live" ? DEFAULT_AGENT_ENDPOINT : DEFAULT_VOICE_LLM_ENDPOINT;
+  els.routeHint.textContent =
+    state.routeMode === "live"
+      ? "Fast voice model. Best for realtime Thai/English conversation."
+      : "SUNDAY agent path. Slower, but tools, skills, memory, and data sources are enabled.";
+  if (persist) saveSettings();
+}
+
 function saveSettings() {
   const values = {
+    routeMode: state.routeMode,
     mode: els.mode.value,
     stt: els.stt.value,
     sttModel: els.sttModel.value,
@@ -103,7 +139,7 @@ function saveSettings() {
     fallbackEndpoint: els.fallbackEndpoint.value,
     model: els.model.value,
     voice: els.voice.value,
-    settingsVersion: "agent-v1",
+    settingsVersion: SETTINGS_VERSION,
   };
   localStorage.setItem("sundayVoiceLiveSettings", JSON.stringify(values));
 }
@@ -112,6 +148,7 @@ function loadSettings() {
   try {
     const values = JSON.parse(localStorage.getItem("sundayVoiceLiveSettings") || "{}");
     for (const [key, value] of Object.entries(values)) {
+      if (key === "routeMode") continue;
       const input = {
         mode: els.mode,
         stt: els.stt,
@@ -125,13 +162,16 @@ function loadSettings() {
       if (input && value) input.value = value;
     }
     if (
-      !values.settingsVersion &&
-      /127\.0\.0\.1:808[12]\/v1\/chat\/completions/.test(els.endpoint.value)
+      values.settingsVersion !== SETTINGS_VERSION ||
+      /127\.0\.0\.1:8000\/v1\/voice\/turn/.test(els.endpoint.value)
     ) {
-      els.endpoint.value = DEFAULT_AGENT_ENDPOINT;
-      els.fallbackEndpoint.value = DEFAULT_FAST_FALLBACK;
+      els.endpoint.value = DEFAULT_VOICE_LLM_ENDPOINT;
+      els.fallbackEndpoint.value = DEFAULT_AGENT_ENDPOINT;
+      els.sttModel.value = DEFAULT_STT_MODEL;
+      els.mode.value = "quick";
       saveSettings();
     }
+    setRouteMode(values.routeMode === "agent" ? "agent" : "live", false);
   } catch {}
 }
 
@@ -218,6 +258,7 @@ async function askAssistant(text) {
   const assistantNode = addTurn("assistant", "");
   state.aborter = new AbortController();
   setStatus("Thinking");
+  setRouteMode(state.routeMode, false);
 
   const response = await fetch("/api/live-turn", {
     method: "POST",
@@ -225,13 +266,14 @@ async function askAssistant(text) {
     body: JSON.stringify({
       llm_endpoint: els.endpoint.value.trim(),
       fallback_endpoint: els.fallbackEndpoint.value.trim(),
-      force_fallback: false,
+      route_mode: state.routeMode,
+      force_fallback: state.routeMode === "agent",
       model: els.model.value.trim() || "local-model",
       messages: state.history.slice(-12),
       voice: els.voice.value,
-      temperature: settings().temperature,
-      top_p: settings().topP,
-      max_tokens: settings().maxTokens,
+      temperature: requestOptions().temperature,
+      top_p: requestOptions().topP,
+      max_tokens: requestOptions().maxTokens,
     }),
     signal: state.aborter.signal,
   });
@@ -259,7 +301,16 @@ async function askAssistant(text) {
       if (event.type === "text_delta") {
         if (!firstTokenAt) {
           firstTokenAt = performance.now();
-          els.latency.textContent = `First token: ${Math.round(firstTokenAt - started)}ms`;
+          const llmMs = Math.round(firstTokenAt - started);
+          const sttMs = state.lastSttStartedAt && state.lastSttEndedAt
+            ? Math.round(state.lastSttEndedAt - state.lastSttStartedAt)
+            : 0;
+          const totalMs = state.lastUtteranceStartedAt
+            ? Math.round(firstTokenAt - state.lastUtteranceStartedAt)
+            : llmMs;
+          els.latency.textContent = sttMs
+            ? `Token: ${llmMs}ms · STT: ${sttMs}ms · Total: ${totalMs}ms`
+            : `First token: ${llmMs}ms`;
         }
         full += event.delta;
         assistantNode.textContent = full;
@@ -510,6 +561,7 @@ function startLocalRecording() {
   state.mediaRecorder.start();
   state.recording = true;
   state.recordingStartedAt = performance.now();
+  state.lastUtteranceStartedAt = state.recordingStartedAt;
   clearTimeout(maxRecordTimer);
   maxRecordTimer = setTimeout(() => {
     if (state.recording) stopLocalRecording();
@@ -531,6 +583,7 @@ async function submitLocalRecording() {
   const blob = new Blob(state.recordingChunks, { type: state.mediaRecorder.mimeType || "audio/webm" });
   if (blob.size < 1200) return;
   state.localTranscribing = true;
+  state.lastSttStartedAt = performance.now();
   setStatus("Transcribing locally");
   try {
     const response = await fetch("/api/transcribe", {
@@ -544,6 +597,7 @@ async function submitLocalRecording() {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || `STT failed: ${response.status}`);
+    state.lastSttEndedAt = performance.now();
     const prompt = (result.text || "").trim();
     if (!prompt) {
       setStatus("Listening locally");
@@ -569,6 +623,8 @@ if (!SpeechRecognition && els.stt.value === "browser") {
 }
 
 loadSettings();
+els.liveMode.addEventListener("click", () => setRouteMode("live"));
+els.agentMode.addEventListener("click", () => setRouteMode("agent"));
 for (const input of [
   els.mode,
   els.stt,

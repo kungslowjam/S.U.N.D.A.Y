@@ -110,6 +110,11 @@ omni-lab/models/
 omni-lab/output/
 omni-lab/build-logs/
 
+# MTP Lab artifacts
+mtp-lab/atomic-llama-cpp-turboquant/
+mtp-lab/build*/
+mtp-lab/*.json
+
 # ---------------------------------------------------------------------------
 # Distillation runtime artifacts (defense in depth — these should always live
 # in ~/.openjarvis/, never inside the source tree, but we ignore them here in

@@ -205,8 +205,11 @@ class ArxivSearchTool(BaseTool):
         return ToolSpec(
             name="arxiv_search",
             description=(
-                "Search arXiv for academic preprints. Use for research paper "
-                "requests when arXiv coverage is appropriate."
+                "Search arXiv for academic preprints. Use only when the user "
+                "explicitly asks for arXiv/preprints, or when openalex_search "
+                "returns no useful results. For broad research paper searches "
+                "such as water management, smart water, IoT water monitoring, "
+                "or applied engineering papers, prefer openalex_search first."
             ),
             parameters={
                 "type": "object",

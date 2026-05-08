@@ -22,7 +22,7 @@ repetition_penalty = 1.0
 [agent]
 default_agent = "native_openhands"        # CodeAct-style agent
 max_turns = 10                            # Up to 10 tool-calling turns
-tools = "code_interpreter,openalex_search,arxiv_search,web_search,file_read,calculator,think"
+tools = "code_interpreter,openalex_search,web_search,file_read,calculator,think"
 objective = "Answer questions accurately using available tools"
 context_from_memory = false               # No memory injection during eval
 
@@ -121,5 +121,5 @@ host = "127.0.0.1"
 port = 8098
 agent_endpoint = "http://127.0.0.1:8000/v1/voice/turn"
 fast_fallback_endpoint = "http://127.0.0.1:8082/v1/chat/completions"
-stt_model = "Vinxscribe/biodatlab-whisper-th-medium-faster"
+stt_model = "base"
 stt_language = "auto"

@@ -7,7 +7,7 @@ $LlamaCppPath = "$ProjectRoot\llama-cpp"
 $ModelPath = if ($env:SUNDAY_VOICE_MODEL_PATH) { $env:SUNDAY_VOICE_MODEL_PATH } else { ".\models\Qwen3.5-0.8B-Q4_K_M.gguf" }
 $Port = if ($env:SUNDAY_VOICE_LLM_PORT) { [int]$env:SUNDAY_VOICE_LLM_PORT } else { 8082 }
 $GpuLayers = if ($env:SUNDAY_VOICE_GPU_LAYERS) { [int]$env:SUNDAY_VOICE_GPU_LAYERS } else { 99 }
-$ContextSize = if ($env:SUNDAY_VOICE_CONTEXT_SIZE) { [int]$env:SUNDAY_VOICE_CONTEXT_SIZE } else { 2048 }
+$ContextSize = if ($env:SUNDAY_VOICE_CONTEXT_SIZE) { [int]$env:SUNDAY_VOICE_CONTEXT_SIZE } else { 1024 }
 $ConsoleWindowStyle = if ($env:SUNDAY_CONSOLE_STYLE) { $env:SUNDAY_CONSOLE_STYLE } else { "Hidden" }
 if (@("Normal", "Hidden", "Minimized", "Maximized") -notcontains $ConsoleWindowStyle) {
     $ConsoleWindowStyle = "Hidden"
@@ -49,6 +49,33 @@ function Wait-ForHttp {
     Write-Host ""
 }
 
+function Invoke-VoiceWarmup {
+    param([int]$Port)
+    $body = @{
+        model = "local-model"
+        messages = @(
+            @{ role = "system"; content = "You are a fast voice assistant. Reply with one word." },
+            @{ role = "user"; content = "warmup" }
+        )
+        stream = $false
+        max_tokens = 1
+        temperature = 0
+        chat_template_kwargs = @{ enable_thinking = $false }
+    } | ConvertTo-Json -Depth 8 -Compress
+    try {
+        Invoke-WebRequest `
+            -Uri "http://127.0.0.1:$Port/v1/chat/completions" `
+            -Method Post `
+            -ContentType "application/json" `
+            -Body $body `
+            -UseBasicParsing `
+            -TimeoutSec 20 | Out-Null
+        Write-Host "[VOICE LLM] Warmup complete." -ForegroundColor DarkGreen
+    } catch {
+        Write-Host "[VOICE LLM] Warmup skipped: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 if (-not (Test-Path (Join-Path $LlamaCppPath $ModelPath))) {
     throw "Voice model not found: $LlamaCppPath\$ModelPath"
 }
@@ -77,4 +104,5 @@ if (Test-Http "http://127.0.0.1:$Port/v1/models" 2) {
     Wait-ForHttp "http://127.0.0.1:$Port/v1/models" 90
 }
 
+Invoke-VoiceWarmup -Port $Port
 Write-Host "[VOICE LLM] Ready: http://127.0.0.1:$Port/v1/chat/completions" -ForegroundColor Green

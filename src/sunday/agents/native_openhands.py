@@ -51,6 +51,11 @@ OPENHANDS_SYSTEM_PROMPT = (  # noqa: E501
     "- When the user asks you to look up, search, fetch, "
     "or summarize a URL or topic, use a matching `skill_*` first when one "
     "exists; otherwise use web_search. Do NOT say you cannot browse the web.\n"
+    "- When the user asks for research papers, papers, academic literature, "
+    "DOIs, citations, or publications by year, use `openalex_search` first. "
+    "Then use a second source, usually `web_search`, to cross-check or enrich "
+    "the result. Use `arxiv_search` only when the user explicitly asks for "
+    "arXiv/preprints or OpenAlex returns no useful results.\n"
     "- When the user provides a URL, pass the FULL URL "
     "(including https://) as the query to web_search. "
     "Do NOT rewrite URLs into search keywords.\n"
@@ -287,16 +292,20 @@ class NativeOpenHandsAgent(ToolUsingAgent):
             if skill_name == "arxiv":
                 search_query = task or "academic research papers"
                 search_hint = (
-                    " Next, call exactly one academic search tool first, "
-                    "preferably OpenAlex because it has broad scholarly "
+                    " Next, call OpenAlex as the first academic source, "
+                    "because it has broad scholarly "
                     "coverage and no API key requirement:\n"
                     "Action: openalex_search\n"
                     f"Action Input: {{\"query\": \"{search_query}\", "
                     "\"limit\": 5, \"start_year\": 2024, "
                     "\"end_year\": 2026}}\n"
-                    "Use arxiv_search as fallback if OpenAlex finds nothing. "
-                    "Use generic web_search only as the last fallback. "
-                    "After searching, summarize 5 papers with years and links."
+                    "Then call a second source with web_search using an "
+                    "academic-focused query such as the same topic plus DOI, "
+                    "journal, or Google Scholar terms. Use arxiv_search only "
+                    "when the user explicitly asks for arXiv/preprints or both "
+                    "sources find nothing. After both sources, summarize 5 "
+                    "papers with years, links, and mention which sources were "
+                    "used."
                 )
             return (
                 f"Skill `{skill_name}` is active. Use its playbook already "
@@ -311,15 +320,19 @@ class NativeOpenHandsAgent(ToolUsingAgent):
             "semantic_scholar_search",
             "arxiv_search",
         }:
-            if len(obs_text) > 1200:
-                obs_text = obs_text[:1200] + "\n\n[Search results truncated]"
+            max_search_chars = 2400 if tool_result.tool_name == "openalex_search" else 1200
+            if len(obs_text) > max_search_chars:
+                obs_text = obs_text[:max_search_chars] + "\n\n[Search results truncated]"
             return (
                 f"{obs_text}\n\n"
                 "Now answer the user directly in Thai. Do not describe your "
                 "reasoning process or mention what you plan to do. Include "
                 "only useful results, dates, and links from the search output. "
-                "If results are weak, say that clearly and suggest better "
-                "academic search terms."
+                "For research-paper requests, use two sources when possible: "
+                "OpenAlex plus web_search cross-check. If only one source has "
+                "been used so far, call the second source before the final "
+                "answer. If results are weak, say that clearly and suggest "
+                "better academic search terms."
             )
         if len(obs_text) > 2000:
             obs_text = obs_text[:2000] + "\n\n[Output truncated]"

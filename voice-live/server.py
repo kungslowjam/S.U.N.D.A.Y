@@ -18,7 +18,10 @@ ROOT = Path(__file__).resolve().parent
 DEFAULT_LLM_ENDPOINT = "http://127.0.0.1:8081/v1/chat/completions"
 VOICE_LLM_ENDPOINT = "http://127.0.0.1:8082/v1/chat/completions"
 SUNDAY_AGENT_ENDPOINT = "http://127.0.0.1:8000/v1/voice/turn"
-SENTENCE_RE = re.compile(r"(.+?[.!?](?:\s|$)|.+?[。！？](?:\s|$))", re.S)
+SENTENCE_RE = re.compile(
+    r"(.+?[.!?](?:\s|$)|.+?[。！？](?:\s|$)|.+?(?:ครับ|ค่ะ|คะ|นะ)(?:\s|$))",
+    re.S,
+)
 THAI_RE = re.compile(r"[\u0E00-\u0E7F]")
 _WHISPER_MODEL = None
 _WHISPER_MODEL_NAME = None
@@ -85,14 +88,14 @@ def _iter_sse_json(response) -> str:
 
 def _pop_sentence(buffer: str, force: bool = False) -> tuple[str | None, str]:
     match = SENTENCE_RE.match(buffer)
-    if match and len(match.group(1).strip()) >= 24:
+    if match and len(match.group(1).strip()) >= 14:
         text = match.group(1).strip()
         return text, buffer[match.end() :]
     if force and buffer.strip():
         return buffer.strip(), ""
-    if len(buffer) >= 140:
-        idx = max(buffer.rfind(","), buffer.rfind(";"), buffer.rfind(":"))
-        if idx > 40:
+    if len(buffer) >= 88:
+        idx = max(buffer.rfind(","), buffer.rfind(";"), buffer.rfind(":"), buffer.rfind(" "), buffer.rfind("，"))
+        if idx > 28:
             return buffer[: idx + 1].strip(), buffer[idx + 1 :]
     return None, buffer
 
@@ -150,7 +153,6 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
             "stream": True,
             "temperature": request.get("temperature", 0.4),
             "top_p": request.get("top_p", 0.82),
-            "min_p": request.get("min_p", 0.05),
             "max_tokens": request.get("max_tokens", 160),
             "chat_template_kwargs": {"enable_thinking": False},
         }
@@ -300,12 +302,14 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
         system = {
             "role": "system",
             "content": (
-                "You are SUNDAY Voice. Reply only with the final answer. "
+                "You are SUNDAY Voice in fast live conversation mode. "
+                "Reply only with the final answer. "
                 "If the user speaks Thai, reply in Thai. "
                 "If the user mixes Thai and English, reply in the same Thai-English mix. "
                 "Keep English technical terms when they are natural. "
                 "Do not repeat the user's words. Do not explain your thinking. "
-                "Keep replies under two short spoken sentences."
+                "Keep replies under 25 words unless the user asks for details. "
+                "Prefer one natural spoken sentence."
             ),
         }
         cleaned = []
@@ -317,33 +321,58 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
             if role == "system":
                 continue
             cleaned.append({"role": role, "content": content})
-        return [system, *cleaned[-8:]]
+        return [system, *cleaned[-6:]]
 
     @staticmethod
     def _choose_endpoint(request: dict) -> str:
+        route_mode = str(request.get("route_mode") or "").lower()
+        primary = request.get("llm_endpoint") or VOICE_LLM_ENDPOINT
+        fallback = request.get("fallback_endpoint") or SUNDAY_AGENT_ENDPOINT
+        if route_mode == "live":
+            return primary
+        if route_mode == "agent":
+            return fallback
+
         text = " ".join(
             str(message.get("content", ""))
             for message in request.get("messages", [])
             if message.get("role") == "user"
         ).lower()
-        fallback = request.get("fallback_endpoint") or DEFAULT_LLM_ENDPOINT
-        primary = request.get("llm_endpoint") or SUNDAY_AGENT_ENDPOINT
         if primary.rstrip("/").endswith("/v1/voice/turn"):
             return primary
-        hard_markers = (
+        agent_markers = (
+            "tool",
+            "tools",
+            "skill",
+            "skills",
+            "research",
+            "paper",
+            "papers",
+            "search",
+            "browse",
+            "web",
+            "github",
             "code",
             "debug",
-            "explain",
-            "analyze",
-            "plan",
-            "architecture",
-            "why",
-            "how exactly",
-            "step by step",
+            "file",
+            "folder",
+            "open ",
+            "install",
+            "download",
+            "ใช้ tool",
+            "ใช้ skill",
+            "ค้น",
+            "ค้นหา",
+            "หา research",
+            "งานวิจัย",
+            "เปิดไฟล์",
+            "แก้ไฟล์",
+            "ติดตั้ง",
+            "ดาวน์โหลด",
         )
-        if request.get("force_fallback") or THAI_RE.search(text):
+        if request.get("force_fallback"):
             return fallback
-        if len(text) > 220 or any(marker in text for marker in hard_markers):
+        if any(marker in text for marker in agent_markers):
             return fallback
         return primary
 

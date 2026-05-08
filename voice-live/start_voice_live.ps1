@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 
 $Root = $PSScriptRoot
 $Port = if ($env:SUNDAY_VOICE_LIVE_PORT) { [int]$env:SUNDAY_VOICE_LIVE_PORT } else { 8098 }
-$PreloadStt = if ($env:SUNDAY_STT_PRELOAD) { $env:SUNDAY_STT_PRELOAD } else { "Vinxscribe/biodatlab-whisper-th-medium-faster" }
+$PreloadStt = if ($env:SUNDAY_STT_PRELOAD) { $env:SUNDAY_STT_PRELOAD } else { "base" }
 $StartVoiceLlm = if ($env:SUNDAY_START_VOICE_LLM) { $env:SUNDAY_START_VOICE_LLM -ne "0" } else { $true }
 $OpenBrowser = if ($env:SUNDAY_OPEN_VOICE_BROWSER) { $env:SUNDAY_OPEN_VOICE_BROWSER -ne "0" } else { $true }
 $ConsoleWindowStyle = if ($env:SUNDAY_CONSOLE_STYLE) { $env:SUNDAY_CONSOLE_STYLE } else { "Hidden" }
