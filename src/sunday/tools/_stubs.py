@@ -116,6 +116,16 @@ class ToolExecutor:
         self._capability_policy = capability_policy
         self._agent_id = agent_id
         self._boundary_guard = boundary_guard
+        # Persistent thread pool (max_workers=1) ensures Playwright state 
+        # is preserved on the same thread across calls.
+        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+    def __del__(self) -> None:
+        """Shut down the persistent thread pool on destruction."""
+        try:
+            self._pool.shutdown(wait=False)
+        except Exception:
+            pass
 
     def execute(self, tool_call: ToolCall) -> ToolResult:
         """Parse arguments, dispatch to tool, measure latency, emit events."""
@@ -130,19 +140,30 @@ class ToolExecutor:
         # Parse arguments
         try:
             params = json.loads(tool_call.arguments) if tool_call.arguments else {}
-        except json.JSONDecodeError as exc:
-            return ToolResult(
-                tool_name=tool_call.name,
-                content=f"Invalid arguments JSON: {exc}",
-                success=False,
-            )
+            # Robustness: if params is a string, wrap it in a dict using the first required param
+            if isinstance(params, str):
+                required = tool.spec.parameters.get("required", [])
+                if required:
+                    params = {required[0]: params}
+                else:
+                    # Fallback to 'query' or first property
+                    props = list(tool.spec.parameters.get("properties", {}).keys())
+                    key = "query" if "query" in props else (props[0] if props else "input")
+                    params = {key: params}
+        except json.JSONDecodeError:
+            # Non-JSON fallback: treat raw string as the primary parameter
+            required = tool.spec.parameters.get("required", [])
+            key = required[0] if required else "query"
+            params = {key: tool_call.arguments}
 
         # Boundary guard: scan external tool arguments
         if self._boundary_guard is not None and not getattr(tool, "is_local", True):
             try:
+                # Sync arguments back to ToolCall for boundary check
+                tool_call.arguments = json.dumps(params)
                 tool_call = self._boundary_guard.check_outbound(tool_call)
                 # Re-parse arguments after potential redaction
-                params = json.loads(tool_call.arguments) if tool_call.arguments else {}
+                params = json.loads(tool_call.arguments)
             except Exception as exc:
                 return ToolResult(
                     tool_name=tool_call.name,
@@ -232,13 +253,12 @@ class ToolExecutor:
                 {"tool": tool_call.name, "arguments": params},
             )
 
-        # Execute with timeout
+        # Execute with timeout on the persistent pool
         timeout = tool.spec.timeout_seconds or self._default_timeout
         t0 = time.time()
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(tool.execute, **params)
-                result = future.result(timeout=timeout)
+            future = self._pool.submit(tool.execute, **params)
+            result = future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
             if self._bus:
                 self._bus.publish(
@@ -284,12 +304,7 @@ class ToolExecutor:
                 )
             else:
                 result_text = str(result.content)[:10240] if result.content else ""
-            # Pass through ToolResult.metadata so downstream consumers
-            # (TraceCollector → TraceStep.metadata → SkillOptimizer) can
-            # see skill-tagged invocations.  Filter to JSON-serializable
-            # values only — internal objects like TaintSet (added by the
-            # taint auto-detect above) must not leak to event subscribers
-            # since the trace store will JSON-serialize them later.
+            
             event_metadata = self._json_safe_metadata(result.metadata)
             self._bus.publish(
                 EventType.TOOL_CALL_END,
@@ -306,16 +321,7 @@ class ToolExecutor:
 
     @staticmethod
     def _json_safe_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Return a copy of *metadata* containing only JSON-serializable values.
-
-        ``ToolExecutor`` annotates ``ToolResult.metadata`` with internal
-        objects (currently ``_taint: TaintSet``).  Those are useful for
-        in-process security checks but cannot be serialized when the
-        ``TraceCollector`` writes ``TraceStep.metadata`` to JSON in the
-        SQLite trace store.  This helper drops any keys whose value is
-        not JSON-safe — silently, since the missing data is not
-        load-bearing for downstream consumers.
-        """
+        """Return a copy of *metadata* containing only JSON-serializable values."""
         if not metadata:
             return {}
 
@@ -328,7 +334,6 @@ class ToolExecutor:
             try:
                 json.dumps(value)
             except (TypeError, ValueError):
-                # Skip non-serializable values (e.g. TaintSet)
                 continue
             safe[key] = value
         return safe
@@ -348,26 +353,7 @@ def build_tool_descriptions(
     include_category: bool = True,
     include_cost: bool = False,
 ) -> str:
-    """Build rich text descriptions from a list of tools.
-
-    This is the single source of truth for all text-based agents that need
-    to describe available tools in their system prompts.
-
-    Parameters
-    ----------
-    tools:
-        List of tool instances.
-    include_category:
-        Whether to include the ``Category:`` line.
-    include_cost:
-        Whether to include ``Cost estimate:`` and ``Latency estimate:`` lines.
-
-    Returns
-    -------
-    str
-        Formatted multi-tool description, or ``"No tools available."`` if
-        *tools* is empty.
-    """
+    """Build rich text descriptions from a list of tools."""
     if not tools:
         return "No tools available."
 

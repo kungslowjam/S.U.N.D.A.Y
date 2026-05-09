@@ -41,9 +41,8 @@ FINAL_ANSWER: <your final answer>
 1. You MUST use at least one tool for EVERY task - never answer directly
 2. Match the tool to the task type (see guide above)
 3. For LLM tools, write clear prompts that will get good responses
-4. Prefer specialized tools when available \
-(calculator for math, code_interpreter for code)
-5. For simple factual questions, use fast/cheap tools when available
+4. Prefer specialized tools when available (calculator for math, code_interpreter for code)
+5. If the user asks to 'see', 'look', 'screenshot', or 'capture' (e.g., 'แคปรูป'), you MUST use `browser_screenshot` after navigating to provide visual evidence. (Tip: Use `#twotabsearchtextbox` for Amazon search, `textarea[name='q']` for Google).
 
 NOW SOLVE THE TASK. You MUST use at least one tool - choose the best one for the task.
 """

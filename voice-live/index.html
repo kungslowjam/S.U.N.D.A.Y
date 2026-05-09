@@ -4,116 +4,150 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SUNDAY Voice Live</title>
-  <link rel="stylesheet" href="./style.css?v=minimal-v1">
+  <title>SUNDAY | JARVIS OS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css?v=jarvis-v1">
 </head>
 
-<body>
+<body class="jarvis-theme">
+  <div class="grid-bg"></div>
+  <div class="glow-orb"></div>
+  
   <main class="shell">
-    <section class="hero">
-      <div class="hero-copy">
-        <span class="eyebrow">Voice Live</span>
-        <h1>SUNDAY</h1>
-        <p class="subline">Realtime bilingual command channel</p>
-        <div class="status-chip">
-          <span class="status-dot"></span>
-          <span id="status">Idle</span>
+    <header class="hud-header">
+      <div class="system-id">
+        <div class="logo-orb"></div>
+        <div class="brand">
+          <span class="os-label">SYSTEM OS v4.0</span>
+          <h1>SUNDAY</h1>
         </div>
       </div>
-      <div class="reactor" aria-hidden="true">
-        <div class="ring ring-one"></div>
-        <div class="ring ring-two"></div>
-        <div class="core"></div>
-        <div class="scanline"></div>
-      </div>
-      <div class="signal-panel">
-        <span>MIC SIGNAL</span>
-        <div class="meter" aria-hidden="true"><span id="meterFill"></span></div>
-      </div>
-    </section>
-
-    <section class="controls">
-      <div class="command-strip">
-        <div class="route-mode" role="group" aria-label="Voice route mode">
-          <button id="liveModeBtn" class="mode-tab active" type="button">Live Chat</button>
-          <button id="agentModeBtn" class="mode-tab" type="button">Agent Command</button>
+      
+      <div class="hud-status">
+        <div class="status-indicator">
+          <span class="label">ENGINE</span>
+          <span id="status" class="val">INITIALIZING</span>
         </div>
-        <p id="routeHint" class="route-hint">Fast voice model. Tools stay idle unless you switch modes.</p>
-        <button id="toggleBtn" type="button">Start live</button>
-        <button id="talkBtn" type="button" disabled>Hold to talk</button>
-        <button id="interruptBtn" type="button" disabled>Interrupt</button>
+        <div class="status-indicator">
+          <span class="label">LATENCY</span>
+          <span id="latencyText" class="val">0ms</span>
+        </div>
+        <div class="status-indicator">
+          <span class="label">SESSION</span>
+          <span id="turnText" class="val">TURN 0</span>
+        </div>
       </div>
-      <div class="control-grid">
-        <label>
-          Mode
-          <select id="modeInput">
-              <option value="balanced">Balanced</option>
-              <option value="quick" selected>Quick</option>
-          </select>
-        </label>
-        <label>
-          STT
-          <select id="sttInput">
-            <option value="browser">Browser</option>
-            <option value="local" selected>Local Auto</option>
-            <option value="push">Push-to-talk</option>
-          </select>
-        </label>
-        <label>
-          STT Model
-          <select id="sttModelInput">
-            <option value="tiny">Tiny Multi</option>
-            <option value="base" selected>Base Multi</option>
-            <option value="small">Small Multi</option>
-            <option value="pariya47/distill-whisper-th-large-v3-ct2">Thai Distill CT2</option>
-            <option value="Vinxscribe/biodatlab-whisper-th-medium-faster">Thai Medium CT2</option>
-            <option value="tiny.en">Tiny EN</option>
-            <option value="base.en">Base EN</option>
-          </select>
-        </label>
-        <label>
-          STT Lang
-          <select id="sttLangInput">
-            <option value="auto" selected>Auto</option>
-            <option value="th">Thai</option>
-            <option value="en">English</option>
-          </select>
-        </label>
-        <label class="wide">
-          Voice LLM
-          <input id="endpointInput" value="http://127.0.0.1:8082/v1/chat/completions">
-        </label>
-        <label class="wide">
-          Agent / Tools
-          <input id="fallbackEndpointInput" value="http://127.0.0.1:8000/v1/voice/turn">
-        </label>
-        <label>
-          Model
-          <input id="modelInput" value="local-model">
-        </label>
-        <label>
-          Voice
-          <select id="voiceInput">
-            <option value="auto" selected>Auto TH/EN</option>
-            <option value="en-US-AvaNeural">Ava</option>
-            <option value="en-US-AriaNeural">Aria</option>
-            <option value="en-US-GuyNeural">Guy</option>
-            <option value="en-GB-SoniaNeural">Sonia</option>
-            <option value="th-TH-PremwadeeNeural">Premwadee TH</option>
-          </select>
-        </label>
+
+      <div class="header-actions">
+        <button id="settingsToggleBtn" class="hud-btn-icon" title="SYSTEM CONFIG">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
       </div>
-    </section>
+    </header>
 
-    <section class="stats">
-      <span id="latencyText">Latency: -</span>
-      <span id="turnText">Turns: 0</span>
-      <span>Tip: speak in short sentences; interrupt by talking or pressing Interrupt.</span>
-    </section>
+    <div class="main-layout">
+      <section class="visualizer-core">
+        <div class="ark-reactor">
+          <div class="ring-outer"></div>
+          <div class="ring-inner"></div>
+          <div class="energy-pulse"></div>
+          <div class="core-glow"></div>
+        </div>
+        <div class="mic-status">
+          <div class="meter-label">NEURAL INPUT</div>
+          <div class="meter-hud">
+            <div id="meterFill" class="meter-bar"></div>
+          </div>
+        </div>
+        <div class="action-dock">
+          <button id="toggleBtn" class="hud-btn primary">ENGAGE SYSTEM</button>
+          <button id="talkBtn" class="hud-btn" disabled>PTT</button>
+          <button id="interruptBtn" class="hud-btn danger" disabled>STOP</button>
+        </div>
+      </section>
 
-    <section class="conversation" id="conversation" aria-live="polite"></section>
+      <section class="chat-hud">
+        <div class="chat-header">
+          <span class="header-tag">COMMS LINK // ENCRYPTED</span>
+        </div>
+        <div class="conversation" id="conversation" aria-live="polite"></div>
+      </section>
+    </div>
+
+    <div id="settingsDrawer" class="settings-hud">
+      <div class="drawer-header">
+        <h3>CONFIG_OVERRIDE</h3>
+        <button id="closeSettingsBtn" class="close-btn">&times;</button>
+      </div>
+      <section class="controls">
+        <div class="route-selector">
+          <button id="liveModeBtn" class="mode-tab active">LIVE_INT</button>
+          <button id="agentModeBtn" class="mode-tab">AGENT_CMD</button>
+        </div>
+        <p id="routeHint" class="sys-msg">System optimized for low-latency verbal exchange.</p>
+        
+        <div class="config-grid">
+          <div class="field">
+            <label>THINK_MODE</label>
+            <select id="modeInput">
+                <option value="balanced">BALANCED</option>
+                <option value="quick" selected>TURBO</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>STT_ENGINE</label>
+            <select id="sttInput">
+              <option value="browser">BROWSER_API</option>
+              <option value="local" selected>WHISPER_LOCAL</option>
+              <option value="push">MANUAL_PTT</option>
+            </select>
+          </div>
+          <div class="field wide">
+            <label>WHISPER_WEIGHTS</label>
+            <select id="sttModelInput">
+              <option value="tiny">TINY_MULTI</option>
+              <option value="base">BASE_MULTI</option>
+              <option value="Vinxscribe/biodatlab-whisper-th-medium-faster">TH_MEDIUM_FASTER</option>
+              <option value="pariya47/distill-whisper-th-large-v3-ct2" selected>TH_DISTILL_LARGE_V3</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>PRIMARY_LANG</label>
+            <select id="sttLangInput">
+              <option value="auto" selected>AUTO_DETECT</option>
+              <option value="th">THAI</option>
+              <option value="en">ENGLISH</option>
+            </select>
+          </div>
+          <div class="field wide">
+            <label>ENDPOINT_URI</label>
+            <input id="endpointInput" value="http://127.0.0.1:8082/v1/chat/completions">
+          </div>
+          <div class="field wide">
+            <label>FALLBACK_URI</label>
+            <input id="fallbackEndpointInput" value="http://127.0.0.1:8000/v1/voice/turn">
+          </div>
+          <div class="field">
+            <label>LLM_MODEL</label>
+            <input id="modelInput" value="local-model">
+          </div>
+          <div class="field">
+            <label>VOICE_ID</label>
+            <select id="voiceInput">
+              <option value="auto" selected>AUTO_DETECT</option>
+              <option value="en-US-AvaNeural">AVA</option>
+              <option value="th-TH-PremwadeeNeural">PREMWADEE_TH</option>
+            </select>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
-  <script src="./app.js?v=fast-voice-v4"></script>
+
+  <div id="drawerOverlay" class="hud-overlay"></div>
+  <script src="./app.js?v=jarvis-v1"></script>
 </body>
 
 </html>

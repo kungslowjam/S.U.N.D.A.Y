@@ -44,13 +44,26 @@ TECH_TERM_REPLACEMENTS = (
     (re.compile(r"เอส\s*ที\s*ที", re.I), "STT"),
     (re.compile(r"ที\s*ที\s*เอส", re.I), "TTS"),
     (re.compile(r"แอล\s*แอล\s*เอ็ม", re.I), "LLM"),
+    (re.compile(r"เชลล์|เชล", re.I), "shell"),
+    (re.compile(r"เทอร์มินัล|เทอมินอล", re.I), "terminal"),
+    (re.compile(r"โฟลเดอร์|โฟลเด้อ", re.I), "folder"),
+    (re.compile(r"ไดเรกทอรี|ไดเรกทอรี่", re.I), "directory"),
+    (re.compile(r"เมค\s*ได", re.I), "mkdir"),
+    (re.compile(r"กูเกิล|กูเกิ้ล", re.I), "google"),
+    (re.compile(r"สคริปต์|สคริป", re.I), "script"),
 )
 
+
+def _set_cors(handler: SimpleHTTPRequestHandler) -> None:
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type, X-STT-Model, X-STT-Language")
 
 def _json_response(handler: SimpleHTTPRequestHandler, status: int, payload: dict) -> None:
     body = json.dumps(payload).encode("utf-8")
     try:
         handler.send_response(status)
+        _set_cors(handler)
         handler.send_header("Content-Type", "application/json; charset=utf-8")
         handler.send_header("Content-Length", str(len(body)))
         handler.end_headers()
@@ -126,6 +139,11 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def do_OPTIONS(self) -> None:
+        self.send_response(200)
+        _set_cors(self)
+        self.end_headers()
+
     def do_POST(self) -> None:
         if self.path == "/api/transcribe":
             self._handle_transcribe()
@@ -158,6 +176,7 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
         }
 
         self.send_response(200)
+        _set_cors(self)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -210,6 +229,7 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
                 break
 
         self.send_response(200)
+        _set_cors(self)
         self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -220,6 +240,7 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
             "model": request.get("model") or "local-model",
             "temperature": request.get("temperature", 0.4),
             "max_tokens": request.get("max_tokens", 160),
+            "stream": True, # Enable streaming from agent
         }
         req = urllib.request.Request(
             endpoint,
@@ -228,27 +249,45 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
             method="POST",
         )
 
+        full_text = ""
+        tts_buffer = ""
         try:
             with urllib.request.urlopen(req, timeout=300) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            full_text = str(payload.get("text") or "").strip()
-            if full_text:
-                _ndjson_write(self, {"type": "text_delta", "delta": full_text})
-                for sentence in _split_for_tts(full_text):
-                    self._emit_audio(sentence, voice)
+                # Handle potential streaming response from agent
+                if response.info().get("Content-Type", "").startswith("application/x-ndjson"):
+                    for line in response:
+                        if not line.strip(): continue
+                        try:
+                            ev = json.loads(line.decode("utf-8"))
+                            if ev.get("event") == "text_delta":
+                                delta = ev.get("text", "")
+                                full_text += delta
+                                tts_buffer += delta
+                                _ndjson_write(self, {"type": "text_delta", "delta": delta})
+                                while True:
+                                    sentence, tts_buffer = _pop_sentence(tts_buffer)
+                                    if not sentence: break
+                                    self._emit_audio(sentence, voice)
+                            elif ev.get("event") in ("tool_call_start", "skill_execute_start"):
+                                name = ev.get("tool") or ev.get("skill") or "tool"
+                                _ndjson_write(self, {"type": "status", "message": f"Using {name}..."})
+                        except: continue
+                else:
+                    # Fallback for non-streaming
+                    payload = json.loads(response.read().decode("utf-8"))
+                    full_text = str(payload.get("text") or "").strip()
+                    if full_text:
+                        _ndjson_write(self, {"type": "text_delta", "delta": full_text})
+                        for sentence in _split_for_tts(full_text):
+                            self._emit_audio(sentence, voice)
+
+            sentence, tts_buffer = _pop_sentence(tts_buffer, force=True)
+            if sentence:
+                self._emit_audio(sentence, voice)
             _ndjson_write(self, {"type": "done", "text": full_text})
-        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
-            return
-        except urllib.error.URLError as exc:
-            try:
-                _ndjson_write(self, {"type": "error", "error": f"SUNDAY agent request failed: {exc}"})
-            except BrokenPipeError:
-                return
         except Exception as exc:
-            try:
-                _ndjson_write(self, {"type": "error", "error": str(exc)})
-            except BrokenPipeError:
-                return
+            try: _ndjson_write(self, {"type": "error", "error": str(exc)})
+            except: pass
 
     def _handle_transcribe(self) -> None:
         try:
@@ -274,7 +313,11 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
                 text = _transcribe_audio(tmp_path, model_name=model_name, language=language)
             finally:
                 tmp_path.unlink(missing_ok=True)
-            _json_response(self, 200, {"text": text})
+            self.send_response(200)
+            _set_cors(self)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"text": text}).encode("utf-8"))
         except Exception as exc:
             _json_response(self, 500, {"error": str(exc)})
 
@@ -341,34 +384,13 @@ class VoiceLiveHandler(SimpleHTTPRequestHandler):
         if primary.rstrip("/").endswith("/v1/voice/turn"):
             return primary
         agent_markers = (
-            "tool",
-            "tools",
-            "skill",
-            "skills",
-            "research",
-            "paper",
-            "papers",
-            "search",
-            "browse",
-            "web",
-            "github",
-            "code",
-            "debug",
-            "file",
-            "folder",
-            "open ",
-            "install",
-            "download",
-            "ใช้ tool",
-            "ใช้ skill",
-            "ค้น",
-            "ค้นหา",
-            "หา research",
-            "งานวิจัย",
-            "เปิดไฟล์",
-            "แก้ไฟล์",
-            "ติดตั้ง",
-            "ดาวน์โหลด",
+            "tool", "tools", "skill", "skills", "research", "paper", "papers", "search", "browse",
+            "web", "github", "code", "debug", "file", "folder", "open ", "install", "download",
+            "run ", "execute", "shell", "terminal", "command", "mkdir", "delete", "remove", "update",
+            "สรุป", "วิจัย", "ใช้ tool", "ใช้ skill", "ค้น", "ค้นหา", "หา research", "งานวิจัย", "เปิดไฟล์",
+            "แก้ไฟล์", "ติดตั้ง", "ดาวน์โหลด", "รัน", "ประมวลผล", "สร้าง", "ลบ", "ย้าย", "ก๊อป", "ก๊อปปี้",
+            "เขียนโค้ด", "แก้โค้ด", "ดิบัก", "เช็ค", "ตรวจสอบ", "เทอร์มินัล", "เชลล์", "คำสั่ง", "โฟลเดอร์",
+            "ไดเรกทอรี", "เบราว์เซอร์", "กูเกิล", "เสิร์ช"
         )
         if request.get("force_fallback"):
             return fallback
@@ -412,12 +434,24 @@ def _transcribe_audio(path: Path, model_name: str = "tiny", language: str = "aut
     with _WHISPER_LOCK:
         if _WHISPER_MODEL is None or _WHISPER_MODEL_NAME != model_name:
             _WHISPER_LOADING = True
+            
+            # Local model detection
+            target_model = model_name
+            if model_name == "Vinxscribe/biodatlab-whisper-th-medium-faster":
+                local_path = ROOT / "stt_models" / "thai-medium"
+                if local_path.exists():
+                    target_model = str(local_path)
+            elif model_name == "pariya47/distill-whisper-th-large-v3-ct2":
+                local_path = ROOT / "stt_models" / "distill-large"
+                if local_path.exists():
+                    target_model = str(local_path)
+
             device = "cuda"
             compute_type = "int8_float16"
             try:
-                _WHISPER_MODEL = WhisperModel(model_name, device=device, compute_type=compute_type)
+                _WHISPER_MODEL = WhisperModel(target_model, device=device, compute_type=compute_type)
             except Exception:
-                _WHISPER_MODEL = WhisperModel(model_name, device="cpu", compute_type="int8")
+                _WHISPER_MODEL = WhisperModel(target_model, device="cpu", compute_type="int8")
             _WHISPER_MODEL_NAME = model_name
             _WHISPER_LOADING = False
 
@@ -429,11 +463,12 @@ def _transcribe_audio(path: Path, model_name: str = "tiny", language: str = "aut
 
     segments, _ = _WHISPER_MODEL.transcribe(
         str(path),
-        beam_size=1,
-        vad_filter=False,
+        beam_size=10,
+        vad_filter=True,
         language=forced_language,
+        initial_prompt="สวัสดี SUNDAY ระบบช่วยงานอัจฉริยะ คุยภาษาไทยและอังกฤษ technical terms: architecture, shell, script, deploy",
         condition_on_previous_text=False,
-        no_speech_threshold=0.35,
+        no_speech_threshold=0.2,
         word_timestamps=False,
     )
     text = " ".join(segment.text.strip() for segment in segments).strip()

@@ -2,7 +2,7 @@ const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecogni
 const DEFAULT_VOICE_LLM_ENDPOINT = "http://127.0.0.1:8082/v1/chat/completions";
 const DEFAULT_AGENT_ENDPOINT = "http://127.0.0.1:8000/v1/voice/turn";
 const SETTINGS_VERSION = "fast-voice-v5";
-const DEFAULT_STT_MODEL = "base";
+const DEFAULT_STT_MODEL = "pariya47/distill-whisper-th-large-v3-ct2";
 
 const state = {
   live: false,
@@ -57,7 +57,27 @@ const els = {
   liveMode: document.getElementById("liveModeBtn"),
   agentMode: document.getElementById("agentModeBtn"),
   routeHint: document.getElementById("routeHint"),
+  settingsToggle: document.getElementById("settingsToggleBtn"),
+  settingsDrawer: document.getElementById("settingsDrawer"),
+  closeSettings: document.getElementById("closeSettingsBtn"),
+  drawerOverlay: document.getElementById("drawerOverlay"),
 };
+
+function toggleDrawer() {
+  const isOpen = els.settingsDrawer.classList.contains("open");
+  if (isOpen) {
+    els.settingsDrawer.classList.remove("open");
+    els.drawerOverlay.classList.remove("open");
+  } else {
+    els.settingsDrawer.classList.add("open");
+    els.drawerOverlay.classList.add("open");
+  }
+}
+
+els.settingsToggle.addEventListener("click", toggleDrawer);
+els.closeSettings.addEventListener("click", toggleDrawer);
+els.drawerOverlay.addEventListener("click", toggleDrawer);
+
 
 let recognition = null;
 let finalText = "";

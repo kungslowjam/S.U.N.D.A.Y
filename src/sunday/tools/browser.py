@@ -28,8 +28,11 @@ class _BrowserSession:
                 "playwright not installed. Install with: uv sync --extra browser"
             )
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=True)
-        self._page = self._browser.new_page()
+        self._browser = self._playwright.chromium.launch(headless=False)
+        self._page = self._browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 720}
+        )
 
     @property
     def page(self):
@@ -42,6 +45,26 @@ class _BrowserSession:
         if self._playwright:
             self._playwright.stop()
         self._playwright = self._browser = self._page = None
+
+
+def _capture_metadata(page) -> dict:
+    """Capture screenshot and other metadata for visual feedback."""
+    try:
+        import base64
+        import os
+        # Capture screenshot for the UI
+        screenshot_bytes = page.screenshot()
+        b64_data = base64.b64encode(screenshot_bytes).decode("utf-8")
+        
+        # Also save to last_screenshot.png for convenience
+        # Find project root (4 levels up from this file: src/sunday/tools/browser.py)
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        with open(os.path.join(root, "last_screenshot.png"), "wb") as f:
+            f.write(screenshot_bytes)
+            
+        return {"screenshot_base64": b64_data}
+    except Exception:
+        return {}
 
 
 _session = _BrowserSession()
@@ -117,26 +140,17 @@ class BrowserNavigateTool(BaseTool):
 
         try:
             page = _session.page
-            response = page.goto(url, wait_until=wait_for)
+            page.goto(url, wait_until=wait_for)
             title = page.title()
-            text_content = page.inner_text("body")
-            if len(text_content) > 5000:
-                text_content = text_content[:5000] + "\n\n[Content truncated]"
-
-            status = response.status if response else None
+            
+            # Auto-capture screenshot for visual feedback
+            meta = _capture_metadata(page)
+            
             return ToolResult(
                 tool_name="browser_navigate",
-                content=f"Title: {title}\n\n{text_content}",
+                content=f"Navigated to {url}. Title: {title}",
                 success=True,
-                metadata={"url": url, "title": title, "status": status},
-            )
-        except ImportError:
-            return ToolResult(
-                tool_name="browser_navigate",
-                content=(
-                    "playwright not installed. Install with: uv sync --extra browser"
-                ),
-                success=False,
+                metadata={**meta, "url": url, "title": title},
             )
         except Exception as exc:
             return ToolResult(
@@ -199,16 +213,24 @@ class BrowserClickTool(BaseTool):
 
         try:
             page = _session.page
+            # Wait for element to be visible first
+            try:
+                page.wait_for_selector(selector, timeout=5000)
+            except Exception:
+                pass # Continue anyway, maybe it's there
+                
             if by_text:
                 page.get_by_text(selector).click()
             else:
                 page.click(selector)
+            # Auto-capture screenshot for visual feedback
+            meta = _capture_metadata(page)
 
             return ToolResult(
                 tool_name="browser_click",
                 content=f"Clicked element: {selector}",
                 success=True,
-                metadata={"selector": selector, "by_text": by_text},
+                metadata={**meta, "selector": selector, "by_text": by_text},
             )
         except ImportError:
             return ToolResult(
@@ -290,16 +312,24 @@ class BrowserTypeTool(BaseTool):
 
         try:
             page = _session.page
+            # Wait for element to be visible first
+            try:
+                page.wait_for_selector(selector, timeout=5000)
+            except Exception:
+                pass
+
             if clear:
                 page.fill(selector, text)
             else:
                 page.type(selector, text)
+            # Auto-capture screenshot for visual feedback
+            meta = _capture_metadata(page)
 
             return ToolResult(
                 tool_name="browser_type",
-                content=f"Typed text into: {selector}",
+                content=f"Typed text into {selector}: {text}",
                 success=True,
-                metadata={"selector": selector},
+                metadata={**meta, "selector": selector, "text": text},
             )
         except ImportError:
             return ToolResult(
@@ -356,16 +386,19 @@ class BrowserScreenshotTool(BaseTool):
         )
 
     def execute(self, **params: Any) -> ToolResult:
-        path = params.get("path")
+        import os
+        # Find project root (4 levels up from this file: src/sunday/tools/browser.py)
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        default_path = os.path.join(root, "last_screenshot.png")
+        path = params.get("path") or default_path
         full_page = params.get("full_page", False)
 
         try:
             page = _session.page
             screenshot_bytes = page.screenshot(full_page=full_page)
 
-            if path:
-                with open(path, "wb") as f:
-                    f.write(screenshot_bytes)
+            with open(path, "wb") as f:
+                f.write(screenshot_bytes)
 
             b64_data = base64.b64encode(screenshot_bytes).decode("utf-8")
 
@@ -531,10 +564,101 @@ class BrowserExtractTool(BaseTool):
             )
 
 
+# ---------------------------------------------------------------------------
+# Tool 6: BrowserGetElementsTool
+# ---------------------------------------------------------------------------
+
+
+@ToolRegistry.register("browser_get_elements")
+class BrowserGetElementsTool(BaseTool):
+    """Get all interactive elements on the current page."""
+
+    tool_id = "browser_get_elements"
+    is_local = False
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="browser_get_elements",
+            description=(
+                "Get a list of all interactive elements (inputs, buttons, links)"
+                " on the current browser page. Returns their tag, text, and selector."
+                " Use this to discover how to interact with a new website."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": (
+                            "Optional CSS selector to limit the search area. Default: 'body'."
+                        ),
+                    },
+                },
+            },
+            category="browser",
+        )
+
+    def execute(self, **params: Any) -> ToolResult:
+        root_selector = params.get("selector", "body")
+
+        try:
+            page = _session.page
+            # JavaScript to find interactive elements and build a friendly list
+            script = """
+            (selector) => {
+                const root = document.querySelector(selector) || document.body;
+                const elements = root.querySelectorAll('button, input, select, textarea, a, [role="button"], [role="link"]');
+                return Array.from(elements).map(el => {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width === 0 || rect.height === 0 || getComputedStyle(el).display === 'none') return null;
+                    
+                    let best_selector = el.id ? `#${el.id}` : '';
+                    if (!best_selector && el.name) best_selector = `${el.tagName.toLowerCase()}[name="${el.name}"]`;
+                    if (!best_selector && el.type === 'submit') best_selector = 'button[type="submit"]';
+                    
+                    return {
+                        tag: el.tagName.toLowerCase(),
+                        text: el.innerText.trim() || el.placeholder || el.value || el.ariaLabel || '',
+                        type: el.type || '',
+                        id: el.id || '',
+                        name: el.name || '',
+                        selector: best_selector || el.tagName.toLowerCase()
+                    };
+                }).filter(x => x !== null).slice(0, 50); // Limit to top 50
+            }
+            """
+            results = page.evaluate(script, root_selector)
+            
+            # Format results as a readable string
+            lines = [f"Found {len(results)} interactive elements:"]
+            for i, res in enumerate(results):
+                lines.append(f"{i+1}. <{res['tag']}> \"{res['text']}\" (Selector: `{res['selector']}`)")
+            
+            content = "\n".join(lines)
+            
+            # Auto-capture screenshot for visual feedback
+            meta = _capture_metadata(page)
+            
+            return ToolResult(
+                tool_name="browser_get_elements",
+                content=content,
+                success=True,
+                metadata={**meta, "elements": results},
+            )
+        except Exception as exc:
+            return ToolResult(
+                tool_name="browser_get_elements",
+                content=f"Inspection error: {exc}",
+                success=False,
+            )
+
+
 __all__ = [
     "BrowserNavigateTool",
     "BrowserClickTool",
     "BrowserTypeTool",
     "BrowserScreenshotTool",
     "BrowserExtractTool",
+    "BrowserGetElementsTool",
 ]

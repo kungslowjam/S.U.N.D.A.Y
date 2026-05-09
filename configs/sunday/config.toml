@@ -1,33 +1,32 @@
-# SUNDAY configuration — GLM-4.7-Flash eval on 8x A100-80GB
+# ═══════════════════════════════════════════════════════════════
+# SUNDAY CONFIGURATION
+# ═══════════════════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════════════════
-# PILLAR 1: Intelligence — The Model
-# ═══════════════════════════════════════════════════════════════
 [intelligence]
 default_model = "gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
 fallback_model = "gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
 preferred_engine = "llamacpp"
 provider = "local"
-quantization = "q4_k_m"
-# Generation defaults for eval
-temperature = 0.0                         # Deterministic for reproducibility
-max_tokens = 2048                         # Standard eval output length
+
+# Generation defaults
+temperature = 0.4
+max_tokens = 2048
 top_p = 0.9
 top_k = 40
-repetition_penalty = 1.0
+repetition_penalty = 1.1
 
 # ═══════════════════════════════════════════════════════════════
 # PILLAR 2: Agent — The Agentic Harness
 # ═══════════════════════════════════════════════════════════════
 [agent]
-default_agent = "native_openhands"        # CodeAct-style agent
-max_turns = 10                            # Up to 10 tool-calling turns
-tools = "code_interpreter,openalex_search,web_search,file_read,calculator,think"
-objective = "Answer questions accurately using available tools"
-context_from_memory = false               # No memory injection during eval
+default_agent = "orchestrator"
+max_turns = 20
+tools = "code_interpreter,openalex_search,web_search,file_read,file_write,shell,skills,browser_navigate,browser_click,browser_type,browser_screenshot,browser_extract,browser_get_elements,git,calculator,think"
+objective = "Assist the user with coding, analysis, and system tasks using available tools."
+context_from_memory = true
 
 # ═══════════════════════════════════════════════════════════════
-# PILLAR 3: Tools — MCP Interface
+# PILLAR 3: Tools — Storage & MCP
 # ═══════════════════════════════════════════════════════════════
 [tools.storage]
 default_backend = "sqlite"
@@ -53,41 +52,13 @@ host = "http://localhost:8081"
 models_dir = "c:/Users/hello/Desktop/Project_me/SUNDAY/llama-cpp/models"
 
 # ═══════════════════════════════════════════════════════════════
-# PILLAR 5: Learning — Improvement Methodologies
+# PILLAR 5: Learning & Skills
 # ═══════════════════════════════════════════════════════════════
 [learning]
-enabled = false                           # No learning during eval
-
-[learning.routing]
-policy = "heuristic"
-
-[learning.intelligence]
-policy = "none"
-
-[learning.agent]
-policy = "none"
-
-[learning.metrics]
-accuracy_weight = 0.6
-latency_weight = 0.2
-cost_weight = 0.1
-efficiency_weight = 0.1
-
-# ═══════════════════════════════════════════════════════════════
-# Supporting config
-# ═══════════════════════════════════════════════════════════════
-[telemetry]
 enabled = false
-db_path = "~/.sunday/telemetry.db"
-gpu_metrics = true
-gpu_poll_interval_ms = 50
-energy_vendor = ""                       # Auto-detect; or force "nvidia"/"amd"/"apple"/"cpu_rapl"
-warmup_samples = 0                       # Warmup iterations before steady-state measurement
-steady_state_window = 5                  # Sliding window size for CV stability check
-steady_state_threshold = 0.05            # Coefficient of variation threshold for steady state
 
 [traces]
-enabled = false                           # Record traces for analysis
+enabled = true
 db_path = "~/.sunday/traces.db"
 
 [skills]
@@ -101,15 +72,12 @@ url = "https://github.com/NousResearch/hermes-agent.git"
 auto_update = true
 
 [[skills.sources]]
-source = "openclaw"
-url = "https://github.com/VoltAgent/awesome-openclaw-skills.git"
-auto_update = true
-
-[[skills.sources]]
 source = "officialskills"
 url = "https://github.com/VoltAgent/awesome-agent-skills.git"
-auto_update = true
 
+# ═══════════════════════════════════════════════════════════════
+# PILLAR 6: Server & Interface
+# ═══════════════════════════════════════════════════════════════
 [server]
 host = "0.0.0.0"
 port = 8000
@@ -121,5 +89,5 @@ host = "127.0.0.1"
 port = 8098
 agent_endpoint = "http://127.0.0.1:8000/v1/voice/turn"
 fast_fallback_endpoint = "http://127.0.0.1:8082/v1/chat/completions"
-stt_model = "base"
-stt_language = "auto"
+stt_model = "pariya47/distill-whisper-th-large-v3-ct2"
+stt_language = "th"
