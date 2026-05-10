@@ -182,6 +182,29 @@ export function ToolCallCard({ toolCall }: Props) {
               </pre>
             </div>
           )}
+          {toolCall.metadata?.screenshot_base64 && (
+            <div className="mt-2">
+              <div
+                style={{
+                  color: 'var(--color-text-tertiary)',
+                  fontSize: 9.5,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: 4,
+                }}
+              >
+                vision
+              </div>
+              <div style={{ padding: '2px', background: 'var(--color-code-bg, rgba(0,0,0,0.2))', borderRadius: 6 }}>
+                <img 
+                  src={`data:image/jpeg;base64,${toolCall.metadata.screenshot_base64}`} 
+                  alt="Vision" 
+                  className="w-full rounded"
+                  style={{ objectFit: 'contain', maxHeight: 300, display: 'block' }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -605,6 +605,7 @@ export interface AgentToolCallEnd {
   success: boolean;
   latency: number;
   result?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export async function sendAgentMessage(
@@ -680,6 +681,7 @@ export async function sendAgentMessage(
                 success: !!parsed.success,
                 latency: typeof parsed.latency === 'number' ? parsed.latency : 0,
                 result: parsed.result,
+                metadata: parsed.metadata,
               });
             } catch {
               /* skip */

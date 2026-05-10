@@ -1841,7 +1841,7 @@ function InteractTab({ agentId, agentStatus }: { agentId: string; agentStatus: s
           setStreamingToolCalls([...collectedToolCalls]);
           setProgressLabel(`Calling ${tool}...`);
         },
-        onToolCallEnd: ({ tool, success, latency, result }) => {
+        onToolCallEnd: ({ tool, success, latency, result, metadata }) => {
           const match = [...collectedToolCalls]
             .reverse()
             .find((t) => t.tool === tool && t.status === 'running');
@@ -1849,6 +1849,7 @@ function InteractTab({ agentId, agentStatus }: { agentId: string; agentStatus: s
             match.status = success ? 'success' : 'error';
             match.latency = latency;
             match.result = result;
+            match.metadata = metadata;
           }
           setStreamingToolCalls([...collectedToolCalls]);
           setProgressLabel('');

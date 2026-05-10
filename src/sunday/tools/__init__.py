@@ -151,4 +151,9 @@ try:
 except ImportError:
     pass
 
+try:
+    import sunday.tools.browser_use_ext  # noqa: F401
+except ImportError:
+    pass
+
 __all__ = ["BaseTool", "ToolExecutor", "ToolSpec"]

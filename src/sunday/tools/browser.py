@@ -18,9 +18,36 @@ class _BrowserSession:
         self._browser = None
         self._page = None
 
+    @property
+    def page(self):
+        self._ensure_browser()
+        return self._page
+
+    def close(self) -> None:
+        """Forcefully close the current session."""
+        try:
+            if self._page:
+                self._page.close()
+            if self._browser:
+                self._browser.close()
+            if self._playwright:
+                self._playwright.stop()
+        except Exception:
+            pass
+        self._page = None
+        self._browser = None
+        self._playwright = None
+
     def _ensure_browser(self) -> None:
         if self._page is not None:
-            return
+            try:
+                # Heartbeat check to see if the session is still alive
+                self._page.evaluate("1")
+                return
+            except Exception:
+                # Page or browser has been closed/died, reset everything
+                self.close()
+
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
@@ -42,6 +69,84 @@ class _BrowserSession:
             locale="th-TH",
             timezone_id="Asia/Bangkok"
         )
+        
+        # Spoof navigator.webdriver and other bot detection properties, plus Auto Popup Killer
+        self._page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', {get: () => ['th-TH', 'th', 'en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            
+            // ═══════════════════════════════════════════════════════════════
+            // JARVIS - Advanced Popup & Overlay Shield (V2 - Aggressive)
+            // ═══════════════════════════════════════════════════════════════
+            setInterval(() => {
+                const closeSelectors = [
+                    '[aria-label="Close"]', '[aria-label="close"]', '[aria-label="ปิด"]',
+                    '.close-button', '.modal-close', '.popup-close', '.btn-close', 
+                    '.fancybox-close', '.insider-opt-in-notification-close-button',
+                    'img[src*="close"]', 'i.fa-times', 'i.fa-close', 'svg[data-icon="xmark"]',
+                    'div[id*="close"]', 'div[class*="close"]', '.ab-close-button',
+                    // Amazon & Travel Sites Specifics
+                    '[data-action-type="DISMISS"]', '.a-button-close', '#nav-main .nav-sprite',
+                    'input[data-action-type="SELECT_LOCATION"]',
+                    '.bui-modal__close', '[aria-label="Dismiss sign-in info."]',
+                    '.modal-mask-close', '.sgn-x', '.shopee-popup__close-btn'
+                ];
+                
+                // 1. Target Modals & Dialogs directly
+                document.querySelectorAll('[role="dialog"], [aria-modal="true"], .modal, .popup-container').forEach(el => {
+                    if (!el.hasAttribute('data-sunday-handled-modal')) {
+                        console.log('[Jarvis] Detected Modal, searching for exit...');
+                        // Look for any small button or X-like element inside
+                        const possibleButtons = el.querySelectorAll('button, [role="button"], i, svg');
+                        possibleButtons.forEach(btn => {
+                            const rect = btn.getBoundingClientRect();
+                            if (rect.width < 50 && rect.height < 50) { // Likely a close 'X'
+                                btn.click();
+                            }
+                        });
+                        el.setAttribute('data-sunday-handled-modal', 'true');
+                    }
+                });
+
+                // 2. Click Close buttons with force
+                document.querySelectorAll(closeSelectors.join(',')).forEach(el => {
+                    const style = window.getComputedStyle(el);
+                    if(style.display !== 'none' && style.visibility !== 'hidden' && el.getBoundingClientRect().width > 0) {
+                        try { 
+                            if (!el.hasAttribute('data-sunday-handled')) {
+                                el.click(); 
+                                el.setAttribute('data-sunday-handled', 'true');
+                            }
+                        } catch(e){}
+                    }
+                });
+
+                // 3. GHOST MODE: Hide persistent blockers that cover too much screen
+                document.querySelectorAll('div').forEach(el => {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    if (style.position === 'fixed' && 
+                        rect.width > window.innerWidth * 0.5 && 
+                        rect.height > window.innerHeight * 0.5 &&
+                        style.zIndex > 1000) {
+                        // If it's been here too long, ghost it
+                        const startTime = parseInt(el.getAttribute('data-sunday-start') || Date.now());
+                        el.setAttribute('data-sunday-start', startTime);
+                        if (Date.now() - startTime > 5000) {
+                            console.log('[Jarvis] Ghosting persistent blocker:', el);
+                            el.style.display = 'none';
+                            el.style.pointerEvents = 'none';
+                        }
+                    }
+                });
+            }, 1000); // Check every 1 second instead of 2
+
+            // 3. JARVIS Visual Indicator (Blue Glow)
+            // Note: Keyframes moved to Shadow DOM for encapsulation
+        """)
+        
         self._setup_cursor(self._page)
 
     def _setup_cursor(self, page) -> None:
@@ -73,9 +178,55 @@ class _BrowserSession:
             const style = document.createElement('style');
             style.textContent = `
                 @keyframes sunday-pulse {
-                    0% { opacity: 0.7; box-shadow: inset 0 0 60px 20px rgba(0, 123, 255, 0.4); }
-                    50% { opacity: 1; box-shadow: inset 0 0 100px 40px rgba(0, 123, 255, 0.6); }
-                    100% { opacity: 0.7; box-shadow: inset 0 0 60px 20px rgba(0, 123, 255, 0.4); }
+                    0% { box-shadow: inset 0 0 40px 10px rgba(0, 242, 254, 0.4), 0 0 0 0px rgba(0, 242, 254, 0.6); }
+                    50% { box-shadow: inset 0 0 80px 30px rgba(0, 242, 254, 0.7), 0 0 20px 5px rgba(0, 242, 254, 0.4); }
+                    100% { box-shadow: inset 0 0 40px 10px rgba(0, 242, 254, 0.4), 0 0 0 0px rgba(0, 242, 254, 0.6); }
+                }
+                @keyframes sunday-glow-pulse {
+                    0% { box-shadow: 0 0 10px #00f2fe, inset 0 0 5px #00f2fe; border-color: #00f2fe; }
+                    50% { box-shadow: 0 0 25px #4facfe, inset 0 0 15px #4facfe; border-color: #4facfe; }
+                    100% { box-shadow: 0 0 10px #00f2fe, inset 0 0 5px #00f2fe; border-color: #00f2fe; }
+                }
+                @keyframes sunday-ripple {
+                    0% { transform: scale(0); opacity: 1; border-width: 4px; }
+                    100% { transform: scale(4); opacity: 0; border-width: 1px; }
+                }
+                .sunday-target-highlight {
+                    animation: sunday-glow-pulse 1s infinite ease-in-out !important;
+                    outline: 2px solid #00f2fe !important;
+                    border-radius: 6px !important;
+                    z-index: 2147483645 !important;
+                    transition: all 0.3s ease !important;
+                }
+                .sunday-click-ripple {
+                    position: fixed;
+                    width: 30px;
+                    height: 30px;
+                    border: 2px solid #00f2fe;
+                    border-radius: 50%;
+                    pointer-events: none;
+                    z-index: 2147483647;
+                    animation: sunday-ripple 0.6s ease-out;
+                    transform: translate(-50%, -50%);
+                }
+                #sunday-cursor-status {
+                    position: absolute;
+                    bottom: 25px;
+                    left: 20px;
+                    background: rgba(10, 10, 20, 0.9);
+                    color: #00f2fe;
+                    padding: 4px 12px;
+                    border-radius: 20px;
+                    font-size: 11px;
+                    font-weight: bold;
+                    font-family: 'Inter', sans-serif;
+                    white-space: nowrap;
+                    border: 1px solid #00f2fe;
+                    box-shadow: 0 0 10px rgba(0, 242, 254, 0.4);
+                    pointer-events: none;
+                    backdrop-filter: blur(4px);
+                    opacity: 0;
+                    transition: opacity 0.3s ease;
                 }
             `;
             shadow.appendChild(style);
@@ -86,18 +237,21 @@ class _BrowserSession:
                 window.__playwright_cursor = document.createElement('div');
                 Object.assign(window.__playwright_cursor.style, {
                     position: 'fixed',
-                    width: '20px',
-                    height: '20px',
-                    backgroundColor: 'rgba(255, 0, 0, 0.8)',
-                    border: '3px solid white',
+                    width: '16px',
+                    height: '16px',
+                    background: 'radial-gradient(circle, #00f2fe 0%, #4facfe 100%)',
+                    border: '2px solid #fff',
                     borderRadius: '50%',
                     pointerEvents: 'none',
                     zIndex: '2147483647',
-                    transition: 'all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1)',
-                    transform: 'translate(-50%, -50%)',
-                    display: 'none',
-                    boxShadow: '0 0 15px rgba(0,0,0,0.6)'
+                    boxShadow: '0 0 15px #00f2fe, 0 0 30px rgba(0, 242, 254, 0.4)',
+                    display: 'none'
                 });
+                
+                const status = document.createElement('div');
+                status.id = 'sunday-cursor-status';
+                window.__playwright_cursor.appendChild(status);
+                
                 shadow.appendChild(window.__playwright_cursor);
             }
             
@@ -127,78 +281,171 @@ class _BrowserSession:
         injectStyles();
 
         window.__get_ax_tree = () => {
-            window.__show_scanner(); // Show laser scan when reading elements
-            const interactiveRoles = ['button', 'link', 'checkbox', 'menuitem', 'option', 'tab', 'textbox'];
-            const elements = Array.from(document.querySelectorAll('button, a, input, select, textarea, [role]'));
+            window.__show_scanner(); 
+            const interactiveRoles = ['button', 'link', 'checkbox', 'menuitem', 'option', 'tab', 'textbox', 'combobox'];
             const tree = [];
             let idCounter = 1;
             
-            elements.forEach(el => {
-                const rect = el.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).display !== 'none') {
-                    const role = el.getAttribute('role') || el.tagName.toLowerCase();
-                    const text = el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '';
-                    if (text.trim() || interactiveRoles.includes(role)) {
-                        const id = idCounter++;
-                        el.setAttribute('data-sunday-id', id);
-                        tree.push({
-                            id,
-                            role,
-                            text: text.trim().substring(0, 100),
-                            x: Math.round(rect.left + rect.width / 2),
-                            y: Math.round(rect.top + rect.height / 2)
-                        });
+            const processNode = (node) => {
+                if (!node || !node.querySelectorAll) return;
+                const elements = node.querySelectorAll('button, a, input, select, textarea, [role], [onclick], span, div');
+                elements.forEach(el => {
+                    // Avoid duplicates if already processed in this turn
+                    if (el.hasAttribute('data-sunday-id')) return;
+
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    
+                    if (rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden') {
+                        const role = el.getAttribute('role') || el.tagName.toLowerCase();
+                        const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim();
+                        
+                        const isClickable = style.cursor === 'pointer' || el.onclick || el.hasAttribute('onclick') || interactiveRoles.includes(role);
+                        
+                        // Logic to include meaningful elements
+                        if (text.length > 0 || isClickable) {
+                            // Filter out giant layout containers unless they are interactive
+                            if (rect.width < 1000 || isClickable || ['a', 'button', 'input'].includes(role)) {
+                                const id = idCounter++;
+                                el.setAttribute('data-sunday-id', id);
+                                tree.push({
+                                    id,
+                                    role,
+                                    text: text.substring(0, 100).replace(/\n/g, ' '),
+                                    x: Math.round(rect.left + rect.width / 2),
+                                    y: Math.round(rect.top + rect.height / 2)
+                                });
+                            }
+                        }
                     }
-                }
-            });
+                    // Deep crawl into shadow roots
+                    if (el.shadowRoot) processNode(el.shadowRoot);
+                });
+            };
+            
+            processNode(document);
             return tree;
         };
 
-        window.__move_cursor = (x, y) => {
+        window.__move_cursor = (x, y, statusText = '') => {
             if (!window.__playwright_cursor) return;
             window.__playwright_cursor.style.display = 'block';
-            window.__playwright_cursor.style.left = x + 'px';
-            window.__playwright_cursor.style.top = y + 'px';
             
-            const trail = document.createElement('div');
-            Object.assign(trail.style, {
-                position: 'fixed',
-                left: x + 'px',
-                top: y + 'px',
-                width: '8px',
-                height: '8px',
-                backgroundColor: 'rgba(255, 0, 0, 0.5)',
-                borderRadius: '50%',
-                transform: 'translate(-50%, -50%)',
-                pointerEvents: 'none',
-                zIndex: '2147483646',
-                transition: 'opacity 1.5s ease-out'
-            });
-            document.body.appendChild(trail);
-            setTimeout(() => { trail.style.opacity = '0'; }, 200);
-            setTimeout(() => trail.remove(), 1600);
+            const statusEl = window.__playwright_cursor.querySelector('#sunday-cursor-status');
+            if (statusEl) {
+                if (statusText) {
+                    statusEl.innerText = statusText;
+                    statusEl.style.opacity = '1';
+                } else {
+                    statusEl.style.opacity = '0';
+                }
+            }
 
-            const ripple = document.createElement('div');
-            Object.assign(ripple.style, {
-                position: 'fixed',
-                left: x + 'px',
-                top: y + 'px',
-                width: '1px',
-                height: '1px',
-                border: '4px solid red',
-                borderRadius: '50%',
-                transform: 'translate(-50%, -50%)',
-                pointerEvents: 'none',
-                zIndex: '2147483646',
-                transition: 'all 0.6s ease-out'
-            });
-            document.body.appendChild(ripple);
-            setTimeout(() => {
-                ripple.style.width = '60px';
-                ripple.style.height = '60px';
-                ripple.style.opacity = '0';
-            }, 10);
-            setTimeout(() => ripple.remove(), 700);
+            const currentLeft = parseFloat(window.__playwright_cursor.style.left) || x;
+            const currentTop = parseFloat(window.__playwright_cursor.style.top) || y;
+            
+            const dx = x - currentLeft;
+            const dy = y - currentTop;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            function createTrail(tx, ty) {
+                const trail = document.createElement('div');
+                Object.assign(trail.style, {
+                    position: 'fixed', left: tx + 'px', top: ty + 'px',
+                    width: '4px', height: '4px', backgroundColor: 'rgba(0, 242, 254, 0.4)',
+                    borderRadius: '50%', transform: 'translate(-50%, -50%)',
+                    pointerEvents: 'none', zIndex: '2147483646', transition: 'opacity 0.4s ease-out'
+                });
+                document.body.appendChild(trail);
+                setTimeout(() => { trail.style.opacity = '0'; }, 50);
+                setTimeout(() => trail.remove(), 500);
+            }
+            
+            function createRipple(rx, ry) {
+                const ripple = document.createElement('div');
+                ripple.className = 'sunday-click-ripple';
+                ripple.style.left = rx + 'px';
+                ripple.style.top = ry + 'px';
+                document.body.appendChild(ripple);
+                setTimeout(() => ripple.remove(), 600);
+            }
+
+            if (dist < 10) {
+                window.__playwright_cursor.style.left = x + 'px';
+                window.__playwright_cursor.style.top = y + 'px';
+                if (statusText.toLowerCase().includes('click')) createRipple(x, y);
+                return;
+            }
+
+            const duration = Math.min(800, Math.max(300, dist * 1.5));
+            const startTime = performance.now();
+            let lastTrailTime = startTime;
+
+            const animate = (time) => {
+                let progress = (time - startTime) / duration;
+                if (progress > 1) progress = 1;
+                const easeOut = 1 - Math.pow(1 - progress, 4);
+                const curX = currentLeft + dx * easeOut;
+                const curY = currentTop + dy * easeOut;
+                
+                window.__playwright_cursor.style.left = curX + 'px';
+                window.__playwright_cursor.style.top = curY + 'px';
+                
+                if (time - lastTrailTime > 30) {
+                    createTrail(curX, curY);
+                    lastTrailTime = time;
+                }
+                
+                if (progress < 1) requestAnimationFrame(animate);
+                else if (statusText.toLowerCase().includes('click')) createRipple(x, y);
+            };
+            requestAnimationFrame(animate);
+        };
+
+        window.__highlight_target = (selector) => {
+            document.querySelectorAll('.sunday-target-highlight').forEach(el => el.classList.remove('sunday-target-highlight'));
+            const target = typeof selector === 'string' ? document.querySelector(selector) : selector;
+            if (target) target.classList.add('sunday-target-highlight');
+        };
+
+            if (dist < 5) {
+                window.__playwright_cursor.style.left = x + 'px';
+                window.__playwright_cursor.style.top = y + 'px';
+                createRipple(x, y);
+                return;
+            }
+
+            const duration = 400; // ms
+            const startTime = performance.now();
+            let lastTrailTime = startTime;
+
+            const animate = (time) => {
+                let progress = (time - startTime) / duration;
+                if (progress > 1) progress = 1;
+                
+                // Ease out cubic
+                const easeOut = 1 - Math.pow(1 - progress, 3);
+                
+                const curX = currentLeft + dx * easeOut;
+                const curY = currentTop + dy * easeOut;
+                
+                window.__playwright_cursor.style.left = curX + 'px';
+                window.__playwright_cursor.style.top = curY + 'px';
+                
+                // Create trail at a steady rate
+                if (time - lastTrailTime > 20) {
+                    createTrail(curX, curY);
+                    lastTrailTime = time;
+                }
+
+                if (progress < 1) {
+                    requestAnimationFrame(animate);
+                } else {
+                    createRipple(x, y);
+                }
+            };
+            
+            requestAnimationFrame(animate);
         };
         """
         try:
@@ -207,19 +454,13 @@ class _BrowserSession:
         except Exception:
             pass
 
-    def _visual_move(self, page, selector: str) -> None:
-        """Move the visual cursor to an element before action."""
+    def _visual_move(self, page, x: float, y: float, status: str = "", selector: str = "") -> None:
+        """Move the visual cursor to coordinates or selector with status."""
         try:
-            # Ensure script is there (in case of navigation)
-            page.evaluate("window.__move_cursor && window.__move_cursor(0,0)")
-            el = page.wait_for_selector(selector, timeout=2000)
-            if el:
-                box = el.bounding_box()
-                if box:
-                    x = box['x'] + box['width'] / 2
-                    y = box['y'] + box['height'] / 2
-                    page.evaluate(f"window.__move_cursor({x}, {y})")
-                    page.wait_for_timeout(400) # Wait for animation
+            if selector:
+                page.evaluate(f"window.__highlight_target('{selector}')")
+            page.evaluate(f"window.__move_cursor({x}, {y}, '{status}')")
+            page.wait_for_timeout(500) # Wait for animation to finish
         except Exception:
             pass
 
@@ -247,10 +488,16 @@ def _capture_metadata(page) -> dict:
         
         # Save to last_screenshot.jpg (renamed for clarity)
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        with open(os.path.join(root, "last_screenshot.jpg"), "wb") as f:
+        screenshot_path = os.path.join(root, "last_screenshot.jpg")
+        with open(screenshot_path, "wb") as f:
             f.write(screenshot_bytes)
+        
+        warning = _check_page_validity(page)
+        msg = f"Screenshot saved to {screenshot_path}"
+        if warning:
+            msg = f"{warning}\n{msg}"
             
-        return {"screenshot_base64": b64_data}
+        return {"screenshot_base64": b64_data, "message": msg}
     except Exception:
         return {}
 
@@ -301,6 +548,19 @@ class BrowserNavigateTool(BaseTool):
 
     def execute(self, **params: Any) -> ToolResult:
         url = params.get("url", "")
+        wait_for = params.get("wait_for", "load")
+        
+        # 🛡️ URL Sanitization: Handle cases where model sends JSON-like string
+        if isinstance(url, str) and url.startswith('{') and 'url' in url:
+            import json
+            try:
+                data = json.loads(url)
+                url = data.get('url', url)
+            except:
+                pass
+        
+        url = str(url).strip().strip('"').strip("'")
+        
         if not url:
             return ToolResult(
                 tool_name="browser_navigate",
@@ -308,7 +568,9 @@ class BrowserNavigateTool(BaseTool):
                 success=False,
             )
 
-        wait_for = params.get("wait_for", "load")
+        if not url.startswith("http") and "." in url:
+            url = f"https://{url}"
+
         if wait_for not in ("load", "domcontentloaded", "networkidle"):
             wait_for = "load"
 
@@ -329,8 +591,58 @@ class BrowserNavigateTool(BaseTool):
         try:
             page = _session.page
             page.goto(url, wait_until=wait_for)
-            title = page.title()
             
+            # Detect Cloudflare / Bot detection / Security Verification
+            title = page.title()
+            security_keywords = ["Just a moment...", "Checking your browser", "security verification", "Verify you are human", "Cloudflare", "Attention Required!"]
+            
+            if any(k.lower() in title.lower() for k in security_keywords):
+                # 1. Attempt Auto-Click for common challenges using Real Mouse movements
+                try:
+                    # Find the challenge element coordinates (even inside iframes)
+                    box = page.evaluate("""() => {
+                        const sel = ['input[type="checkbox"]', '#challenge-stage', '.ctp-checkbox-label', '#cf-stage', '.cf-turnstile-wrapper', '.mark'];
+                        for (const s of sel) {
+                            const el = document.querySelector(s);
+                            if (el && el.getBoundingClientRect().width > 0) {
+                                const r = el.getBoundingClientRect();
+                                return { x: r.left + r.width/2, y: r.top + r.height/2 };
+                            }
+                        }
+                        // Check iframes for Turnstile
+                        for (const f of document.querySelectorAll('iframe')) {
+                            try {
+                                const d = f.contentDocument || f.contentWindow.document;
+                                for (const s of sel) {
+                                    const el = d.querySelector(s);
+                                    if (el && el.getBoundingClientRect().width > 0) {
+                                        const fr = f.getBoundingClientRect();
+                                        const er = el.getBoundingClientRect();
+                                        return { x: fr.left + er.left + er.width/2, y: fr.top + er.top + er.height/2 };
+                                    }
+                                }
+                            } catch(e){}
+                        }
+                        return null;
+                    }""")
+                    
+                    if box:
+                        # Perform human-like mouse movement and click
+                        page.mouse.move(box['x'], box['y'], steps=15)
+                        page.mouse.click(box['x'], box['y'], delay=120)
+                except:
+                    pass
+
+                # 2. Wait for challenge to pass (max 20s)
+                try:
+                    page.wait_for_function(
+                        f"() => !({ ' || '.join([f'document.title.toLowerCase().includes(\"{k.lower()}\")' for k in security_keywords]) })", 
+                        timeout=20000
+                    )
+                    title = page.title()
+                except Exception:
+                    pass # Continue anyway, user can solve it manually
+                    
             # Auto-capture screenshot for visual feedback
             meta = _capture_metadata(page)
             
@@ -346,6 +658,25 @@ class BrowserNavigateTool(BaseTool):
                 content=f"Navigation error: {exc}",
                 success=False,
             )
+
+@ToolRegistry.register("browser_reset")
+class BrowserResetTool(BaseTool):
+    """Forcefully restarts the browser session. Use if the browser hangs or gives errors."""
+    
+    spec = ToolSpec(
+        name="browser_reset",
+        description="Forcefully restarts the shared browser session.",
+        parameters={"type": "object", "properties": {}},
+    )
+
+    def execute(self, **params: Any) -> ToolResult:
+        _session.close()
+        _session._ensure_browser()
+        return ToolResult(
+            tool_name="browser_reset",
+            content="Browser session has been forcefully restarted.",
+            success=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -401,34 +732,74 @@ class BrowserClickTool(BaseTool):
 
         try:
             page = _session.page
-            # Wait for element to be visible first
-            try:
-                page.wait_for_selector(selector, timeout=2000)
-            except Exception:
-                pass # Continue anyway, maybe it's there
-                
+            
+            # 1. Target by Numeric ID (@id)
             if selector.startswith("@"):
-                # Numeric ID targeting
                 target_id = selector[1:]
-                page.evaluate(f"""
-                    const el = document.querySelector('[data-sunday-id="{target_id}"]');
-                    if (el) el.click();
-                """)
-                # Also move cursor visually
-                res = page.evaluate(f"""
+                box = page.evaluate(f"""() => {{
                     const el = document.querySelector('[data-sunday-id="{target_id}"]');
                     if (el) {{
                         const r = el.getBoundingClientRect();
-                        window.__move_cursor(r.left + r.width/2, r.top + r.height/2);
+                        return {{ x: r.left + r.width/2, y: r.top + r.height/2 }};
                     }}
-                """)
-                page.wait_for_timeout(500)
-            elif by_text:
-                _session._visual_move(page, f"text={selector}")
-                page.get_by_text(selector).first.click()
-            else:
-                _session._visual_move(page, selector)
-                page.locator(selector).first.click()
+                    return null;
+                }}""")
+                if box:
+                    _session._visual_move(page, box['x'], box['y'], status="Clicking...", selector=f"[data-sunday-id='{target_id}']")
+                    page.mouse.click(box['x'], box['y'])
+                    return ToolResult(tool_name="browser_click", content=f"Clicked element @{target_id}", success=True)
+                return ToolResult(tool_name="browser_click", content=f"Element @{target_id} not found", success=False)
+
+            # 2. Target by Text (with fuzzy match and Shadow DOM)
+            if by_text or "contains" in selector:
+                # Clean selector if it was 'button:contains("...")'
+                clean_text = selector
+                if "contains('" in selector:
+                    clean_text = selector.split("'")[1]
+                elif 'contains("' in selector:
+                    clean_text = selector.split('"')[1]
+                
+                # Safety guard: Don't click on ambiguous 1-char strings (prevents 'a', 'i' hallucinations)
+                if len(clean_text) < 2:
+                    return ToolResult(tool_name="browser_click", content=f"Text target '{clean_text}' is too short and ambiguous. Try a more specific word.", success=False)
+                
+                box = page.evaluate(f"""() => {{
+                    const target = "{clean_text.replace('"', '\\"').lower()}";
+                    const crawl = (root) => {{
+                        const nodes = root.querySelectorAll('button, a, span, div, input, [role="button"]');
+                        for (const node of nodes) {{
+                            const txt = (node.innerText || node.value || node.placeholder || "").toLowerCase();
+                            if (txt.includes(target)) {{
+                                const r = node.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0) return {{ x: r.left + r.width/2, y: r.top + r.height/2 }};
+                            }}
+                            if (node.shadowRoot) {{
+                                const res = crawl(node.shadowRoot);
+                                if (res) return res;
+                            }}
+                        }}
+                        return null;
+                    }};
+                    return crawl(document);
+                }}""")
+                
+                if box:
+                    _session._visual_move(page, box['x'], box['y'], status="Clicking...")
+                    page.mouse.click(box['x'], box['y'])
+                    return ToolResult(tool_name="browser_click", content=f"Clicked text '{clean_text}' via coordinates", success=True)
+
+            # 3. Target by Standard CSS Selector
+            try:
+                page.wait_for_selector(selector, timeout=3000, state="visible")
+                el = page.locator(selector).first
+                box = el.bounding_box()
+                if box:
+                    _session._visual_move(page, box['x'] + box['width']/2, box['y'] + box['height']/2, status="Clicking...", selector=selector)
+                page.click(selector, delay=50)
+                return ToolResult(tool_name="browser_click", content=f"Clicked selector '{selector}'", success=True)
+            except Exception as e:
+                return ToolResult(tool_name="browser_click", content=f"Could not click '{selector}': {e}", success=False)
+
             # Auto-capture screenshot for visual feedback
             meta = _capture_metadata(page)
 
@@ -518,32 +889,48 @@ class BrowserTypeTool(BaseTool):
 
         try:
             page = _session.page
-            # Wait for element to be visible first
-            try:
-                page.wait_for_selector(selector, timeout=2000)
-            except Exception:
-                pass
 
             if selector.startswith("@"):
                 # Numeric ID targeting
                 target_id = selector[1:]
                 loc = page.locator(f'[data-sunday-id="{target_id}"]').first
-                if clear:
-                    loc.fill("")
-                
-                import random
-                for char in text:
-                    loc.type(char, delay=random.randint(40, 100))
             else:
-                _session._visual_move(page, selector)
-                loc = page.locator(selector).first
-                if clear:
-                    loc.fill("") # Clear first
-                
-                # Type with human-like delay
-                import random
+                # --- FIX: Escape special CSS chars (e.g. ':' in React IDs like #:R55amr5:)
+                import re as _re
+                safe_selector = selector
+                # If it's an ID selector with special chars, use attribute selector instead
+                if selector.startswith('#') and _re.search(r'[:\[\]()]', selector[1:]):
+                    raw_id = selector[1:]
+                    safe_selector = f'[id="{raw_id}"]'
+                loc = page.locator(safe_selector).first
+
+            # Ensure element is ready
+            try:
+                loc.wait_for(state="visible", timeout=3000)
+            except:
+                pass
+
+            import random
+            # Move to element visually
+            try:
+                box = loc.bounding_box()
+                if box:
+                    _session._visual_move(page, box['x'] + box['width']/2, box['y'] + box['height']/2, status="Typing...", selector=selector)
+            except:
+                pass
+            
+            if clear:
+                try: loc.fill("") # Clear first
+                except: pass
+            
+            # Type with human-like delay
+            try:
+                loc.click() # Focus first
                 for char in text:
-                    loc.type(char, delay=random.randint(40, 100))
+                    loc.type(char, delay=random.randint(30, 80))
+            except Exception as e:
+                # Fallback to direct fill if slow typing fails
+                loc.fill(text)
             # Auto-capture screenshot for visual feedback
             meta = _capture_metadata(page)
 
@@ -830,24 +1217,52 @@ class BrowserGetElementsTool(BaseTool):
             script = """
             (selector) => {
                 const root = document.querySelector(selector) || document.body;
-                const elements = root.querySelectorAll('button, input, select, textarea, a, [role="button"], [role="link"]');
-                return Array.from(elements).map(el => {
+                const elements = root.querySelectorAll('button, input, select, textarea, a, [role="button"], [role="link"], [role="searchbox"]');
+                
+                // Generic noise keywords (Strict)
+                const noiseKeywords = [
+                    'language', 'currency', 'sign in', 'register', 'log in', 'create account',
+                    'help', 'support', 'privacy', 'terms', 'cookies', 'about us', 'contact us',
+                    'skip to', 'navigation', 'footer', 'customer support', 'list your property',
+                    'aud', 'usd', 'eur', 'gbp'
+                ];
+                
+                let found = Array.from(elements).map(el => {
                     const rect = el.getBoundingClientRect();
-                    if (rect.width === 0 || rect.height === 0 || getComputedStyle(el).display === 'none') return null;
+                    // Basic visibility check
+                    if (rect.width === 0 || rect.height === 0 || getComputedStyle(el).display === 'none' || getComputedStyle(el).visibility === 'hidden') return null;
                     
+                    const text = (el.innerText.trim() || el.placeholder || el.value || el.ariaLabel || el.title || '').toLowerCase();
+                    const tagName = el.tagName.toLowerCase();
+                    const role = el.getAttribute('role') || '';
+
+                    // Filter out non-functional noise
+                    if (noiseKeywords.some(n => text.includes(n)) && text.length < 30) return null;
+
                     let best_selector = el.id ? `#${el.id}` : '';
-                    if (!best_selector && el.name) best_selector = `${el.tagName.toLowerCase()}[name="${el.name}"]`;
-                    if (!best_selector && el.type === 'submit') best_selector = 'button[type="submit"]';
+                    if (!best_selector && el.name) best_selector = `${tagName}[name="${el.name}"]`;
+                    if (!best_selector && el.type === 'submit') best_selector = `${tagName}[type="submit"]`;
                     
+                    // Priority Scoring System (General)
+                    let score = 0;
+                    if (tagName === 'input' || tagName === 'textarea' || role === 'searchbox') score += 10; // Inputs are primary
+                    if (el.type === 'submit' || text.includes('search') || text.includes('find') || text.includes('go')) score += 8; // Submit/Search buttons
+                    if (rect.top < window.innerHeight / 2) score += 2; // Favor elements in the top half (usually search bars)
+                    if (el.offsetParent === null) score -= 10; // Hidden or detached
+
                     return {
-                        tag: el.tagName.toLowerCase(),
+                        tag: tagName,
                         text: el.innerText.trim() || el.placeholder || el.value || el.ariaLabel || '',
                         type: el.type || '',
                         id: el.id || '',
                         name: el.name || '',
-                        selector: best_selector || el.tagName.toLowerCase()
+                        selector: best_selector || tagName,
+                        score: score
                     };
-                }).filter(x => x !== null).slice(0, 50); // Limit to top 50
+                }).filter(x => x !== null);
+
+                // Sort by priority score and return top 30 most relevant interactive elements
+                return found.sort((a, b) => b.score - a.score).slice(0, 30);
             }
             """
             results = page.evaluate(script, root_selector)

@@ -9,8 +9,8 @@ preferred_engine = "llamacpp"
 provider = "local"
 
 # Generation defaults
-temperature = 0.2
-max_tokens = 2048
+temperature = 0.1
+max_tokens = 4096
 top_p = 0.9
 top_k = 40
 repetition_penalty = 1.1
@@ -21,10 +21,15 @@ repetition_penalty = 1.1
 [agent]
 default_agent = "orchestrator"
 mode = "structured"
-max_turns = 20
+max_turns = 40
 max_tokens = 4096
-tools = "code_interpreter,openalex_search,web_search,file_read,file_write,shell,skills,browser_navigate,browser_click,browser_type,browser_screenshot,browser_extract,browser_get_elements,browser_drag,browser_scroll,browser_get_accessibility_tree,git,calculator,think"
-objective = "Assist the user with coding, analysis, and system tasks using available tools."
+tools = "code_interpreter,openalex_search,web_search,file_read,file_write,shell,skills,browser_navigate,browser_click,browser_type,browser_screenshot,browser_extract,browser_get_elements,browser_drag,browser_scroll,browser_get_accessibility_tree,browser_reset,browser_use_task,git,calculator,think"
+objective = """You are SUNDAY, an autonomous AI assistant. Use these generalized browser strategies for efficiency:
+1. URL OPTIMIZATION: Always try to identify the platform's URL pattern for filtering. If you can add query parameters (e.g., ?q=product&sort=price) directly, do so to skip manual steps.
+2. SEMANTIC SEARCH: Prioritize interacting with 'input' fields and 'submit' buttons first. Use 'browser_get_elements' to find the primary search bar of any site.
+3. PREFER AUTONOMOUS: For any multi-step task requiring logic (e.g., "find the cheapest 9+ rated hotel"), use 'browser_use_task' as your primary engine. Manual steps should only be used for simple one-click tasks.
+4. RECOVERY: If a selector fails, try finding the element by its label/text. If that fails, assume the site has changed and try a web search to find a deep link to the target page.
+5. NO HALLUCINATION: Never report data you haven't explicitly extracted from the browser or a search result. If a page is empty or blocked, state it clearly."""
 context_from_memory = true
 
 # ═══════════════════════════════════════════════════════════════

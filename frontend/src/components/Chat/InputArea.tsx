@@ -167,6 +167,7 @@ export function InputArea() {
               tc.status = data.success ? 'success' : 'error';
               tc.latency = data.latency;
               tc.result = toDisplayString(data.result);
+              tc.metadata = data.metadata;
             }
             setStreamState({ phase: 'Generating...', activeToolCalls: [...toolCalls] });
             updateLastAssistant(convId, accumulatedContent, [...toolCalls]);

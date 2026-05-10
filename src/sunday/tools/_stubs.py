@@ -137,24 +137,57 @@ class ToolExecutor:
                 success=False,
             )
 
+        # Sanitize arguments string
+        args_str = tool_call.arguments.strip() if tool_call.arguments else ""
+        if args_str.startswith("```json"):
+            args_str = args_str[7:]
+        elif args_str.startswith("```"):
+            args_str = args_str[3:]
+        if args_str.endswith("```"):
+            args_str = args_str[:-3]
+        args_str = args_str.strip()
+
         # Parse arguments
         try:
-            params = json.loads(tool_call.arguments) if tool_call.arguments else {}
+            params = json.loads(args_str) if args_str else {}
             # Robustness: if params is a string, wrap it in a dict using the first required param
             if isinstance(params, str):
                 required = tool.spec.parameters.get("required", [])
-                if required:
-                    params = {required[0]: params}
-                else:
-                    # Fallback to 'query' or first property
-                    props = list(tool.spec.parameters.get("properties", {}).keys())
-                    key = "query" if "query" in props else (props[0] if props else "input")
-                    params = {key: params}
+                key = required[0] if required else "query"
+                params = {key: params}
         except json.JSONDecodeError:
-            # Non-JSON fallback: treat raw string as the primary parameter
-            required = tool.spec.parameters.get("required", [])
-            key = required[0] if required else "query"
-            params = {key: tool_call.arguments}
+            import re
+            params = {}
+            # Try to salvage malformed JSON by extracting the first string value if it looks like JSON
+            if args_str.startswith("{"):
+                # Try to find a URL or string value
+                match = re.search(r'"(?:url|query|code|selector)"\s*:\s*"([^"]+)"', args_str)
+                if match:
+                    val = match.group(1)
+                    # We need to unescape newlines if it's code
+                    val = val.replace('\\n', '\n').replace('\\"', '"')
+                    required = tool.spec.parameters.get("required", [])
+                    key = required[0] if required else "query"
+                    params = {key: val}
+            
+            # If still empty, use the raw string as fallback
+            if not params:
+                required = tool.spec.parameters.get("required", [])
+                key = required[0] if required else "query"
+                params = {key: args_str}
+
+        # Specific sanitization for code_interpreter
+        if tool_call.name == "code_interpreter" and "code" in params:
+            code_str = params["code"]
+            if isinstance(code_str, str):
+                code_str = code_str.strip()
+                if code_str.startswith("```python"):
+                    code_str = code_str[9:]
+                elif code_str.startswith("```"):
+                    code_str = code_str[3:]
+                if code_str.endswith("```"):
+                    code_str = code_str[:-3]
+                params["code"] = code_str.strip()
 
         # Boundary guard: scan external tool arguments
         if self._boundary_guard is not None and not getattr(tool, "is_local", True):

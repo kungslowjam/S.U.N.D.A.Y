@@ -147,6 +147,9 @@ class OrchestratorAgent(ToolUsingAgent):
 
                 observation = f"Observation: {tool_result.content}"
                 messages.append(Message(role=Role.USER, content=observation))
+                
+                # Auto-compress previous large observations to save memory
+                messages = self._compress_tool_outputs(messages)
                 continue
 
             # Neither -> treat content as final answer (but strip thinking)
@@ -189,7 +192,21 @@ class OrchestratorAgent(ToolUsingAgent):
             result["final_answer"] = final_match.group(1).strip()
             return result
 
-        tool_match = re.search(r"TOOL:\s*(.+)", text, re.IGNORECASE)
+        # 1. Match Inline Format TOOL: name({"key": "val"})
+        inline_match = re.search(
+            r"TOOL:\s*(\w+)\s*\((.+?)\)(?=\n||\Z)", 
+            text, 
+            re.DOTALL | re.IGNORECASE
+        )
+        if inline_match:
+            result["tool"] = inline_match.group(1).strip()
+            result["input"] = inline_match.group(2).strip()
+            # If we found an inline call, we can return early or continue to look for final_answer
+            # but usually a tool call means we're not done yet.
+            return result
+
+        # 2. Match Standard Format TOOL: name \n INPUT: json
+        tool_match = re.search(r"TOOL:\s*(\w+)", text, re.IGNORECASE)
         if tool_match:
             result["tool"] = tool_match.group(1).strip()
 
@@ -373,6 +390,22 @@ class OrchestratorAgent(ToolUsingAgent):
                 "total_tokens": total_prompt_tokens + total_completion_tokens,
             },
         )
+    
+    def _compress_tool_outputs(self, messages: List[Message]) -> List[Message]:
+        """Truncate large tool outputs that have already been processed by the assistant."""
+        THRESHOLD = 1500 # Characters
+        new_messages = []
+        for i, msg in enumerate(messages):
+            # If it's a large observation and there's a subsequent assistant response, truncate it.
+            if msg.role == Role.USER and msg.content.startswith("Observation: ") and len(msg.content) > THRESHOLD:
+                if i + 1 < len(messages) and messages[i+1].role == Role.ASSISTANT:
+                    # Keep a snippet and a note
+                    snippet = msg.content[:200]
+                    truncated = f"{snippet}... [RAW DATA TRUNCATED TO SAVE MEMORY. REFER TO PREVIOUS SUMMARY IN THOUGHT.]"
+                    new_messages.append(Message(role=Role.USER, content=truncated))
+                    continue
+            new_messages.append(msg)
+        return new_messages
 
 
     def _strip_think_tags(self, text: str) -> str:

@@ -83,11 +83,37 @@ class CodeInterpreterTool(BaseTool):
                 text=True,
                 timeout=self._timeout,
             )
+            
+            # Auto-install missing module if needed
+            if result.returncode != 0 and "ModuleNotFoundError: No module named" in result.stderr:
+                import re
+                match = re.search(r"No module named '([^']+)'", result.stderr)
+                if match:
+                    module_name = match.group(1)
+                    # Install the module
+                    subprocess.run(
+                        [sys.executable, "-m", "pip", "install", module_name],
+                        capture_output=True,
+                        timeout=60,
+                    )
+                    # Re-run the code
+                    result = subprocess.run(
+                        [sys.executable, "-c", code],
+                        capture_output=True,
+                        text=True,
+                        timeout=self._timeout,
+                    )
+                    
             output = result.stdout
             if result.stderr:
                 output += ("\n" if output else "") + result.stderr
             if len(output) > self._max_output:
                 output = output[: self._max_output] + "\n... (output truncated)"
+            
+            # If still failed with ModuleNotFoundError after install attempt, give a hint
+            if result.returncode != 0 and "ModuleNotFoundError" in output:
+                output += "\n\nHint: You may need to use the 'shell' tool to run 'pip install <package_name>' if the module name differs from the package name."
+                
             return ToolResult(
                 tool_name="code_interpreter",
                 content=output or "(no output)",
