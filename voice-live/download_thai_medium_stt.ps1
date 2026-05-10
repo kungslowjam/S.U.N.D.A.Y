@@ -17,24 +17,41 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[THAI MEDIUM STT] Downloading/loading Vinxscribe/biodatlab-whisper-th-medium-faster" -ForegroundColor Cyan
+Write-Host "Saving to: $ProjectRoot\voice-live\stt_models\thai-medium" -ForegroundColor Gray
 Write-Host "This may take several minutes on first run." -ForegroundColor Yellow
 
 @'
+import os
 from faster_whisper import WhisperModel
+from huggingface_hub import snapshot_download
 
 model_id = "Vinxscribe/biodatlab-whisper-th-medium-faster"
-print(f"Loading {model_id} ...", flush=True)
+local_dir = os.path.join("voice-live", "stt_models", "thai-medium")
+
+print(f"Downloading {model_id} to {local_dir}...", flush=True)
 try:
-    WhisperModel(model_id, device="cuda", compute_type="int8_float16")
-    print("Loaded with CUDA.", flush=True)
+    # Ensure local directory exists
+    if not os.path.exists(local_dir):
+        os.makedirs(local_dir, exist_ok=True)
+    
+    # Download using huggingface_hub to specific local dir
+    snapshot_download(repo_id=model_id, local_dir=local_dir, local_dir_use_symlinks=False)
+    
+    print(f"Verifying load from {local_dir}...", flush=True)
+    WhisperModel(local_dir, device="cuda", compute_type="int8_float16")
+    print("Loaded with CUDA successfully.", flush=True)
 except Exception as exc:
-    print(f"CUDA load failed: {exc}", flush=True)
-    WhisperModel(model_id, device="cpu", compute_type="int8")
-    print("Loaded with CPU.", flush=True)
+    print(f"CUDA load or download failed: {exc}", flush=True)
+    try:
+        WhisperModel(local_dir, device="cpu", compute_type="int8")
+        print("Loaded with CPU successfully.", flush=True)
+    except Exception as exc2:
+        print(f"Critical error: {exc2}", flush=True)
+        exit(1)
 '@ | & $Python -
 
 if ($LASTEXITCODE -ne 0) {
     throw "Thai medium STT model download/load failed."
 }
 
-Write-Host "[THAI MEDIUM STT] Ready." -ForegroundColor Green
+Write-Host "[THAI MEDIUM STT] Ready. Saved to voice-live/stt_models/thai-medium" -ForegroundColor Green

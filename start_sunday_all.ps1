@@ -5,14 +5,14 @@ $ProjectRoot = "C:\Users\hello\Desktop\Project_me\SUNDAY"
 $LlamaCppPath = "$ProjectRoot\llama-cpp"
 $DefaultHfModel = "llmfan46/gemma-4-E2B-it-ultra-uncensored-heretic-GGUF:Q4_K_M"
 $DefaultHfFile = "gemma-4-E2B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
-$DefaultLocalGemma = ".\models\gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+$DefaultLocalGemma = ".\models\Qwen3.5-4B-Q4_K_M.gguf"
 $DefaultFallbackModel = ".\models\MiniCPM-o-4_5-Q4_K_M.gguf"
 $ModelSource = if ($env:SUNDAY_MODEL_SOURCE) { $env:SUNDAY_MODEL_SOURCE } elseif (Test-Path (Join-Path $LlamaCppPath $DefaultLocalGemma)) { "local" } else { "hf" }
 $ModelPath = if ($env:SUNDAY_MODEL_PATH) { $env:SUNDAY_MODEL_PATH } elseif (Test-Path (Join-Path $LlamaCppPath $DefaultLocalGemma)) { $DefaultLocalGemma } else { $DefaultFallbackModel }
 $HfModel = if ($env:SUNDAY_HF_MODEL) { $env:SUNDAY_HF_MODEL } else { $DefaultHfModel }
 $HfFile = if ($env:SUNDAY_HF_FILE) { $env:SUNDAY_HF_FILE } else { $DefaultHfFile }
 $GpuLayers = if ($env:SUNDAY_GPU_LAYERS) { [int]$env:SUNDAY_GPU_LAYERS } else { 35 }
-$ContextSize = if ($env:SUNDAY_CONTEXT_SIZE) { [int]$env:SUNDAY_CONTEXT_SIZE } else { 4096 }
+$ContextSize = if ($env:SUNDAY_CONTEXT_SIZE) { [int]$env:SUNDAY_CONTEXT_SIZE } else { 8192 }
 $ParallelSlots = 1
 $LlamaPort = 8081
 $VoiceLlamaPort = 8082
@@ -152,7 +152,8 @@ if (Test-Http "http://localhost:$LlamaPort/v1/models" 2) {
         "--port", "$LlamaPort",
         "-ngl", "$GpuLayers",
         "-c", "$ContextSize",
-        "-np", "$ParallelSlots",
+        "-t", "4",
+        "--parallel", "$ParallelSlots",
         "--cache-ram", "0",
         "--no-warmup"
     )

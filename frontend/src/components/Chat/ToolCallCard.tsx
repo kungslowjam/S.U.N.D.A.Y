@@ -191,7 +191,14 @@ export function ToolCallCard({ toolCall }: Props) {
 function formatJson(raw: unknown): string {
   const text = toDisplayString(raw);
   try {
-    return JSON.stringify(JSON.parse(text), null, 2);
+    const parsed = JSON.parse(text);
+    // Remove internal thought field to keep UI clean and professional
+    if (parsed && typeof parsed === 'object') {
+      delete (parsed as any).thought;
+      // If it was a 'think' tool and now empty, maybe return something else?
+      // For now, empty object is fine to show it was a thought process.
+    }
+    return JSON.stringify(parsed, null, 2);
   } catch {
     return text;
   }

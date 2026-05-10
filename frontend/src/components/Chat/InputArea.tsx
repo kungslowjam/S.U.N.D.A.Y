@@ -4,6 +4,7 @@ import { streamChat } from '../../lib/sse';
 import { fetchSavings, getBase } from '../../lib/api';
 import { MicButton } from './MicButton';
 import { useSpeech } from '../../hooks/useSpeech';
+import { JarvisVoiceOverlay } from './JarvisVoiceOverlay';
 import type { ChatMessage, ToolCallInfo, TokenUsage, MessageTelemetry } from '../../types';
 
 function toDisplayString(value: unknown): string {
@@ -18,6 +19,7 @@ function toDisplayString(value: unknown): string {
 
 export function InputArea() {
   const [input, setInput] = useState('');
+  const [showJarvis, setShowJarvis] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -56,16 +58,7 @@ export function InputArea() {
     : streamState.isStreaming ? 'streaming'
     : undefined;
 
-  const handleMicClick = useCallback(async () => {
-    if (speechState === 'recording') {
-      try {
-        const text = await stopRecording();
-        if (text) setInput((prev) => (prev ? prev + ' ' + text : text));
-      } catch {}
-    } else {
-      await startRecording();
-    }
-  }, [speechState, startRecording, stopRecording]);
+
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -260,6 +253,19 @@ export function InputArea() {
     }
   }, [input, activeId, selectedModel, streamState.isStreaming, createConversation, addMessage, updateLastAssistant, setStreamState, resetStream]);
 
+  const wasVoiceInputRef = useRef(false);
+
+  const handleMicClick = useCallback(async () => {
+    setShowJarvis(true);
+  }, []);
+
+  useEffect(() => {
+    if (input && showJarvis === false && !streamState.isStreaming && wasVoiceInputRef.current) {
+      wasVoiceInputRef.current = false;
+      sendMessage();
+    }
+  }, [input, showJarvis, streamState.isStreaming, sendMessage]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -271,6 +277,19 @@ export function InputArea() {
 
   return (
     <div className="w-full shrink-0" style={{ background: 'transparent' }}>
+      {showJarvis && (
+        <JarvisVoiceOverlay 
+          onTranscript={(userText, assistantText) => {
+            // Add both to history directly
+            const convId = activeId || createConversation(selectedModel);
+            addMessage(convId, { id: generateId(), role: 'user', content: userText, timestamp: Date.now() });
+            addMessage(convId, { id: generateId(), role: 'assistant', content: assistantText, timestamp: Date.now() });
+            
+            // Do NOT close automatically here, the HUD handles its own loop
+          }}
+          onClose={() => setShowJarvis(false)}
+        />
+      )}
       <div className="max-w-[var(--chat-max-width)] mx-auto px-4 pb-5 pt-2">
         <div className="relative">
           <div

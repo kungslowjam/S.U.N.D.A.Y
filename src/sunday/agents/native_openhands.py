@@ -22,57 +22,20 @@ from sunday.core.types import Message, Role, ToolCall, ToolResult
 from sunday.engine._stubs import InferenceEngine
 from sunday.tools._stubs import BaseTool, build_tool_descriptions
 
-OPENHANDS_SYSTEM_PROMPT = (  # noqa: E501
-    "You are SUNDAY, an advanced agentic AI assistant. "
-    "You have access to a browser and other system tools. "
-    "When a user asks for information from the web and mentions 'images', 'screenshots', or 'looking' at something (e.g., 'แคปรูป'), "
-    "you MUST use `browser_screenshot` after navigating to provide visual evidence. "
-    "Do not ask for permission if the user's request implies visual feedback.\n\n"
-    "## Web Tips\n"
-    "- Amazon search: Use selector `#twotabsearchtextbox` or `input[name='field-keywords']`.\n"
-    "- Google search: Use selector `textarea[name='q']` or `input[name='q']`.\n\n"
-    "## How to use tools\n\n"
-    "To call a tool, write on its own lines:\n\n"
-    "Action: <tool_name>\n"
-    "Action Input: <json_arguments>\n\n"
-    "You will receive the result, then continue your "
-    "response.\n\n"
-    "## How to use skills\n\n"
-    "Tools whose names begin with `skill_` are SKILLS. Skills are reusable "
-    "playbooks or pipelines for specific tasks. When a user request matches "
-    "a skill description, call the matching `skill_*` tool before using "
-    "generic tools. If the skill returns markdown instructions, read them "
-    "as your playbook, then follow those instructions using the other tools. "
-    "Do not call the same instructional skill repeatedly in the same turn.\n\n"
-    "Prefer skills for domain workflows such as academic paper search, "
-    "research synthesis, code explanation, data analysis, file creation, "
-    "and other tasks where a matching skill exists. Use generic tools like "
-    "`web_search` only when no matching skill exists or when the skill "
-    "instructs you to search.\n\n"
-    "## Available tools\n\n"
-    "{tool_descriptions}\n\n"
+OPENHANDS_SYSTEM_PROMPT = (
+    "You are SUNDAY, a browser-capable AI agent. You MUST use tools to find info. NEVER say you cannot browse. ALWAYS use tools first. "
+    "If the user mentions a website (Google, Amazon, etc.) or says 'Go to', use `browser_navigate`. "
+    "Use `browser_screenshot` after navigating if visual evidence is needed.\n\n"
+    "## Skills & Tools\n"
+    "- Call tools: `Action: <name>` followed by `Action Input: <json>`.\n"
+    "- Prefer `skill_*` for domain workflows (research, synthesis, files).\n"
+    "- Web Tips: Amazon search use `#twotabsearchtextbox`. Google use `textarea[name='q']`.\n\n"
+    "## Available Tools\n{tool_descriptions}\n\n"
     "{skill_examples}"
-    "## Important rules\n\n"
-    "- When the user asks you to look up, search, fetch, "
-    "or summarize a URL or topic, use a matching `skill_*` first when one "
-    "exists; otherwise use web_search. Do NOT say you cannot browse the web.\n"
-    "- When the user asks for research papers, papers, academic literature, "
-    "DOIs, citations, or publications by year, use `openalex_search` first. "
-    "Then use a second source, usually `web_search`, to cross-check or enrich "
-    "the result. Use `arxiv_search` only when the user explicitly asks for "
-    "arXiv/preprints or OpenAlex returns no useful results.\n"
-    "- When the user provides a URL, pass the FULL URL "
-    "(including https://) as the query to web_search. "
-    "Do NOT rewrite URLs into search keywords.\n"
-    "- When the user asks a math question, use calculator.\n"
-    "- When the user asks to read a file, use file_read.\n"
-    "- You CAN write Python code in ```python blocks and "
-    "it will be executed. Use this for computation, data "
-    "processing, or when no specific tool fits.\n"
-    "- If no tool or code is needed, respond directly "
-    "with your answer.\n"
-    "- Do NOT include <think> tags or internal reasoning "
-    "in your response. Respond directly."
+    "## Rules\n"
+    "- Use matching `skill_*` first, otherwise `web_search`.\n"
+    "- For papers, use `openalex_search`.\n"
+    "- Be concise and act autonomously."
 )
 
 
@@ -444,7 +407,7 @@ class NativeOpenHandsAgent(ToolUsingAgent):
         selected_skill_tools = {
             f"skill_{skill.get('name', '').strip()}"
             for skill in playbooks
-            if skill.get("name")
+            if skill.get('name')
         }
         prompt_tools: list[BaseTool] = []
         for tool in self._tools:
@@ -516,10 +479,6 @@ class NativeOpenHandsAgent(ToolUsingAgent):
             try:
                 result = self._generate(direct_messages)
             except Exception:
-                # Propagate to the eval runner / server bridge so the failure
-                # is recorded as an error instead of a fake "input too long"
-                # answer that silently scores as 0%. Telemetry boundary is
-                # still emitted before re-raising.
                 self._emit_turn_end(turns=1, error=True)
                 raise
             content = self._strip_think_tags(result.get("content", ""))
@@ -557,13 +516,10 @@ class NativeOpenHandsAgent(ToolUsingAgent):
             if self._tools and self._supports_native_tool_schema()
             else []
         )
-        # Side dict for Gemini thought_signatures (ToolCall uses slots)
         _thought_sigs: dict[str, bytes] = {}
 
         for _turn in range(self._max_turns):
             turns += 1
-            # Truncate before every generate call -- tool results may have
-            # expanded the context beyond what the model supports.
             messages = self._truncate_if_needed(messages)
 
             gen_kwargs: dict[str, Any] = {}
@@ -573,22 +529,17 @@ class NativeOpenHandsAgent(ToolUsingAgent):
             try:
                 result = self._generate(messages, **gen_kwargs)
             except Exception:
-                # Propagate so the eval runner records a real error rather
-                # than a fake "input too long" string that silently scores 0.
                 self._emit_turn_end(turns=turns, error=True)
                 raise
 
-            # Accumulate usage from this generate call
             usage = result.get("usage", {})
             for k in total_usage:
                 total_usage[k] += usage.get(k, 0)
 
             content = result.get("content", "")
-            # Strip think tags so they don't interfere with parsing
             content = self._strip_think_tags(content)
             last_content = content
 
-            # --- Native function-calling path (OpenAI, Anthropic, etc.) ---
             raw_tool_calls = result.get("tool_calls", [])
             if raw_tool_calls:
                 native_calls = []
@@ -598,7 +549,6 @@ class NativeOpenHandsAgent(ToolUsingAgent):
                         name=tc.get("name", ""),
                         arguments=tc.get("arguments", "{}"),
                     )
-                    # Preserve thought_signature for Gemini reasoning
                     sig = tc.get("thought_signature")
                     if sig is not None:
                         _thought_sigs[call.id] = sig
@@ -624,14 +574,9 @@ class NativeOpenHandsAgent(ToolUsingAgent):
                     )
                 continue
 
-            # --- Text-based fallback (CodeAct / Action-Input format) ---
-
-            # Try to extract code
             code = self._extract_code(content)
             if code:
                 messages.append(Message(role=Role.ASSISTANT, content=content))
-
-                # Execute via code_interpreter tool if available
                 tool_call = ToolCall(
                     id=f"code_{turns}",
                     name="code_interpreter",
@@ -639,30 +584,25 @@ class NativeOpenHandsAgent(ToolUsingAgent):
                 )
                 tool_result = self._executor.execute(tool_call)
                 all_tool_results.append(tool_result)
-
                 obs_text = self._tool_observation_text(tool_result)
                 observation = f"Output:\n{obs_text}"
                 messages.append(Message(role=Role.USER, content=observation))
                 continue
 
-            # Try tool call
             tool_info = self._extract_tool_call(content)
             if tool_info:
                 action, action_input = tool_info
                 messages.append(Message(role=Role.ASSISTANT, content=content))
-
                 tool_call = ToolCall(
                     id=f"tool_{turns}", name=action, arguments=action_input
                 )
                 tool_result = self._executor.execute(tool_call)
                 all_tool_results.append(tool_result)
-
                 obs_text = self._tool_observation_text(tool_result)
                 observation = f"Result: {obs_text}"
                 messages.append(Message(role=Role.USER, content=observation))
                 continue
 
-            # No code or tool call -- this is the final answer
             content = self._strip_think_tags(content)
             content = self._strip_tool_call_text(content)
             self._emit_turn_end(turns=turns)
@@ -673,7 +613,6 @@ class NativeOpenHandsAgent(ToolUsingAgent):
                 metadata=total_usage,
             )
 
-        # Max turns
         final = self._strip_think_tags(last_content) or "Maximum turns reached."
         final = self._strip_tool_call_text(final)
         result = self._max_turns_result(all_tool_results, turns, content=final)

@@ -149,10 +149,11 @@ class OrchestratorAgent(ToolUsingAgent):
                 messages.append(Message(role=Role.USER, content=observation))
                 continue
 
-            # Neither -> treat content as final answer
+            # Neither -> treat content as final answer (but strip thinking)
+            final_content = self._strip_think_tags(content)
             self._emit_turn_end(turns=turns)
             return AgentResult(
-                content=content,
+                content=final_content,
                 tool_results=all_tool_results,
                 turns=turns,
             )
@@ -170,8 +171,9 @@ class OrchestratorAgent(ToolUsingAgent):
             "final_answer": "",
         }
 
+        # Match THOUGHT: or Thinking Process: or Reasoning:
         thought_match = re.search(
-            r"THOUGHT:\s*(.+?)(?=\nTOOL:|\nFINAL[_ ]?ANSWER:|\Z)",
+            r"(?:THOUGHT|Thinking Process|Reasoning):\s*(.+?)(?=\nTOOL:|\nFINAL[_ ]?ANSWER:|\Z)",
             text,
             re.DOTALL | re.IGNORECASE,
         )
@@ -192,7 +194,7 @@ class OrchestratorAgent(ToolUsingAgent):
             result["tool"] = tool_match.group(1).strip()
 
         input_match = re.search(
-            r"INPUT:\s*(.+?)(?=\nTHOUGHT:|\nTOOL:|\nFINAL|\Z)",
+            r"INPUT:\s*(.+?)(?=\n(?:THOUGHT|Thinking Process|Reasoning):|\nTOOL:|\nFINAL|\Z)",
             text,
             re.DOTALL | re.IGNORECASE,
         )
@@ -371,6 +373,22 @@ class OrchestratorAgent(ToolUsingAgent):
                 "total_tokens": total_prompt_tokens + total_completion_tokens,
             },
         )
+
+
+    def _strip_think_tags(self, text: str) -> str:
+        """Forcefully remove internal thinking/reasoning blocks."""
+        if not text:
+            return ""
+        # Remove XML-style tags
+        text = re.sub(r"<thought>.*?</thought>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        # Remove structured headers
+        text = re.sub(r"(?:THOUGHT|Thinking Process|Reasoning|THOUGHTS):\s*.*?(?=\nTOOL:|\nFINAL|\Z)", "", text, flags=re.DOTALL | re.IGNORECASE)
+        # Remove patterns like "(Wait, ...)" or "Revised: ..." or "Note: ..."
+        text = re.sub(r"\(Wait,.*?\)", "", text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r"(?:Revised|Correction|Choice|Final Choice|Wait).*?:.*", "", text, flags=re.IGNORECASE)
+        # Remove common assistant preambles
+        text = re.sub(r"^(?:Certainly|Sure|I can help with that|Of course|Okay|Alright)[^.!?]*[.!?]\s*", "", text, flags=re.IGNORECASE)
+        return text.strip()
 
 
 __all__ = ["OrchestratorAgent"]

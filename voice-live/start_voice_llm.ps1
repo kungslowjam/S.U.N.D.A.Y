@@ -4,10 +4,21 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = "C:\Users\hello\Desktop\Project_me\SUNDAY"
 $LlamaCppPath = "$ProjectRoot\llama-cpp"
-$ModelPath = if ($env:SUNDAY_VOICE_MODEL_PATH) { $env:SUNDAY_VOICE_MODEL_PATH } else { ".\models\Qwen3.5-0.8B-Q4_K_M.gguf" }
+
+# 1. Engine Detection (Atomic vs Standard)
+$AtomicBinPath = "$ProjectRoot\mtp-lab\build-ninja\bin"
+$AtomicServer = Join-Path $AtomicBinPath "llama-server.exe"
+$UseAtomic = if ($env:SUNDAY_VOICE_USE_ATOMIC -eq "0") { $false } else { Test-Path $AtomicServer }
+
+$ServerPath = if ($UseAtomic) { $AtomicServer } else { Join-Path $LlamaCppPath "llama-server.exe" }
+
+# 2. Model Configuration
+$DefaultModel = ".\models\Qwen3.5-0.8B-Q4_K_M.gguf"
+$ModelPath = if ($env:SUNDAY_VOICE_MODEL_PATH) { $env:SUNDAY_VOICE_MODEL_PATH } else { $DefaultModel }
 $Port = if ($env:SUNDAY_VOICE_LLM_PORT) { [int]$env:SUNDAY_VOICE_LLM_PORT } else { 8082 }
 $GpuLayers = if ($env:SUNDAY_VOICE_GPU_LAYERS) { [int]$env:SUNDAY_VOICE_GPU_LAYERS } else { 99 }
 $ContextSize = if ($env:SUNDAY_VOICE_CONTEXT_SIZE) { [int]$env:SUNDAY_VOICE_CONTEXT_SIZE } else { 1024 }
+
 $ConsoleWindowStyle = if ($env:SUNDAY_CONSOLE_STYLE) { $env:SUNDAY_CONSOLE_STYLE } else { "Hidden" }
 if (@("Normal", "Hidden", "Minimized", "Maximized") -notcontains $ConsoleWindowStyle) {
     $ConsoleWindowStyle = "Hidden"
@@ -76,8 +87,9 @@ function Invoke-VoiceWarmup {
     }
 }
 
-if (-not (Test-Path (Join-Path $LlamaCppPath $ModelPath))) {
-    throw "Voice model not found: $LlamaCppPath\$ModelPath"
+$AbsModelPath = if ([System.IO.Path]::IsPathRooted($ModelPath)) { $ModelPath } else { Join-Path $LlamaCppPath $ModelPath }
+if (-not (Test-Path $AbsModelPath)) {
+    throw "Voice model not found: $AbsModelPath"
 }
 
 if (Test-Http "http://127.0.0.1:$Port/v1/models" 2) {
@@ -86,20 +98,41 @@ if (Test-Http "http://127.0.0.1:$Port/v1/models" 2) {
     Write-Host "[VOICE LLM] Port $Port is busy. Waiting for server..." -ForegroundColor Yellow
     Wait-ForHttp "http://127.0.0.1:$Port/v1/models" 90
 } else {
-    Write-Host "[VOICE LLM] Starting Qwen voice model on http://127.0.0.1:$Port" -ForegroundColor Cyan
-    $Args = @(
-        ".\llama-server.exe",
-        "-m", "'$ModelPath'",
-        "--port", "$Port",
-        "-ngl", "$GpuLayers",
-        "-c", "$ContextSize",
-        "-np", "1",
-        "--cache-ram", "0",
-        "--no-warmup"
-    ) -join " "
+    $EngineName = if ($UseAtomic) { "Atomic TurboQuant" } else { "Standard llama-cpp" }
+    Write-Host "[VOICE LLM] Starting $EngineName on http://127.0.0.1:$Port" -ForegroundColor Cyan
+    Write-Host "            Model: $ModelPath"
+    
+    if ($UseAtomic) {
+        $Args = @(
+            "`"$ServerPath`"",
+            "-m", "`"$AbsModelPath`"",
+            "--port", "$Port",
+            "-ngl", "$GpuLayers",
+            "-c", "$ContextSize",
+            "-np", "1",
+            "-ctk", "turbo3",
+            "-ctv", "turbo3",
+            "-fa", "off",
+            "--no-warmup"
+        )
+    } else {
+        $Args = @(
+            "`"$ServerPath`"",
+            "-m", "`"$AbsModelPath`"",
+            "--port", "$Port",
+            "-ngl", "$GpuLayers",
+            "-c", "$ContextSize",
+            "-np", "1",
+            "--cache-type-k", "q4_0",
+            "--cache-type-v", "q4_0",
+            "--no-warmup"
+        )
+    }
+
+    $FullArgs = $Args -join " "
     Start-Process powershell `
-        -ArgumentList "-NoExit", "-Command", "cd '$LlamaCppPath'; $Args" `
-        -WorkingDirectory $LlamaCppPath `
+        -ArgumentList "-NoExit", "-Command", $FullArgs `
+        -WorkingDirectory (Split-Path $ServerPath -Parent) `
         -WindowStyle $ConsoleWindowStyle
     Wait-ForHttp "http://127.0.0.1:$Port/v1/models" 90
 }

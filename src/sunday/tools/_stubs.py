@@ -350,10 +350,10 @@ class ToolExecutor:
 def build_tool_descriptions(
     tools: List[BaseTool],
     *,
-    include_category: bool = True,
+    include_category: bool = False,
     include_cost: bool = False,
 ) -> str:
-    """Build rich text descriptions from a list of tools."""
+    """Build ultra-compact text descriptions to save tokens."""
     if not tools:
         return "No tools available."
 
@@ -365,34 +365,19 @@ def build_tool_descriptions(
     for t in tools:
         s = t.spec
         desc = get_tool_description_override(s.name) or s.description
-        lines = [f"### {s.name}", desc]
-
-        if include_category and s.category:
-            lines.append(f"Category: {s.category}")
-
-        if include_cost:
-            if s.cost_estimate:
-                lines.append(f"Cost estimate: ${s.cost_estimate:.4f}")
-            if s.latency_estimate:
-                lines.append(f"Latency estimate: {s.latency_estimate:.1f}s")
-
-        # Parameter descriptions
+        lines = [f"- **{s.name}**: {desc}"]
+        
         props = s.parameters.get("properties", {})
-        required = set(s.parameters.get("required", []))
         if props:
-            lines.append("Parameters:")
-            for pname, pinfo in props.items():
-                ptype = pinfo.get("type", "any")
-                req_mark = ", required" if pname in required else ""
-                desc = pinfo.get("description", "")
-                if desc:
-                    lines.append(f"  - {pname} ({ptype}{req_mark}): {desc}")
-                else:
-                    lines.append(f"  - {pname} ({ptype}{req_mark})")
-
+            params = []
+            for name, p in props.items():
+                p_desc = p.get("description", "")
+                params.append(f"{name}: {p_desc}")
+            lines.append(f"  Args: {', '.join(params)}")
+            
         sections.append("\n".join(lines))
 
-    return "\n\n".join(sections)
+    return "\n".join(sections)
 
 
 __all__ = ["BaseTool", "ToolExecutor", "ToolSpec", "build_tool_descriptions"]

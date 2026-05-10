@@ -28,11 +28,200 @@ class _BrowserSession:
                 "playwright not installed. Install with: uv sync --extra browser"
             )
         self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=False)
-        self._page = self._browser.new_page(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 720}
+        self._browser = self._playwright.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-infobars"
+            ]
         )
+        self._page = self._browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 720},
+            locale="th-TH",
+            timezone_id="Asia/Bangkok"
+        )
+        self._setup_cursor(self._page)
+
+    def _setup_cursor(self, page) -> None:
+        """Inject a visual cursor script into the page."""
+        script = """
+        const injectStyles = () => {
+            if (document.getElementById('__sunday_visuals_root')) return;
+            
+            const root = document.createElement('div');
+            root.id = '__sunday_visuals_root';
+            const shadow = root.attachShadow({mode: 'open'});
+            
+            // 1. Pulsing Blue Glow Border
+            const border = document.createElement('div');
+            Object.assign(border.style, {
+                position: 'fixed',
+                top: '0',
+                left: '0',
+                width: '100vw',
+                height: '100vh',
+                boxSizing: 'border-box',
+                pointerEvents: 'none',
+                zIndex: '2147483647',
+                border: '8px solid rgba(0, 123, 255, 0.6)',
+                boxShadow: 'inset 0 0 80px 30px rgba(0, 123, 255, 0.5), 0 0 40px rgba(0, 123, 255, 0.3)',
+                animation: 'sunday-pulse 2s infinite ease-in-out',
+                display: 'block'
+            });
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes sunday-pulse {
+                    0% { opacity: 0.7; box-shadow: inset 0 0 60px 20px rgba(0, 123, 255, 0.4); }
+                    50% { opacity: 1; box-shadow: inset 0 0 100px 40px rgba(0, 123, 255, 0.6); }
+                    100% { opacity: 0.7; box-shadow: inset 0 0 60px 20px rgba(0, 123, 255, 0.4); }
+                }
+            `;
+            shadow.appendChild(style);
+            shadow.appendChild(border);
+            
+            // 2. Persistent Cursor (The Red Dot)
+            if (!window.__playwright_cursor) {
+                window.__playwright_cursor = document.createElement('div');
+                Object.assign(window.__playwright_cursor.style, {
+                    position: 'fixed',
+                    width: '20px',
+                    height: '20px',
+                    backgroundColor: 'rgba(255, 0, 0, 0.8)',
+                    border: '3px solid white',
+                    borderRadius: '50%',
+                    pointerEvents: 'none',
+                    zIndex: '2147483647',
+                    transition: 'all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1)',
+                    transform: 'translate(-50%, -50%)',
+                    display: 'none',
+                    boxShadow: '0 0 15px rgba(0,0,0,0.6)'
+                });
+                shadow.appendChild(window.__playwright_cursor);
+            }
+            
+            (document.body || document.documentElement).appendChild(root);
+        };
+
+        window.__show_scanner = () => {
+            const scanner = document.createElement('div');
+            Object.assign(scanner.style, {
+                position: 'fixed',
+                top: '-10px',
+                left: '0',
+                width: '100vw',
+                height: '8px',
+                backgroundColor: 'rgba(0, 123, 255, 0.8)',
+                boxShadow: '0 0 20px rgba(0, 123, 255, 1)',
+                zIndex: '2147483647',
+                pointerEvents: 'none',
+                transition: 'top 1.2s ease-in-out'
+            });
+            document.documentElement.appendChild(scanner);
+            setTimeout(() => { scanner.style.top = '100vh'; }, 20);
+            setTimeout(() => scanner.remove(), 1300);
+        };
+
+        setInterval(injectStyles, 500);
+        injectStyles();
+
+        window.__get_ax_tree = () => {
+            window.__show_scanner(); // Show laser scan when reading elements
+            const interactiveRoles = ['button', 'link', 'checkbox', 'menuitem', 'option', 'tab', 'textbox'];
+            const elements = Array.from(document.querySelectorAll('button, a, input, select, textarea, [role]'));
+            const tree = [];
+            let idCounter = 1;
+            
+            elements.forEach(el => {
+                const rect = el.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).display !== 'none') {
+                    const role = el.getAttribute('role') || el.tagName.toLowerCase();
+                    const text = el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '';
+                    if (text.trim() || interactiveRoles.includes(role)) {
+                        const id = idCounter++;
+                        el.setAttribute('data-sunday-id', id);
+                        tree.push({
+                            id,
+                            role,
+                            text: text.trim().substring(0, 100),
+                            x: Math.round(rect.left + rect.width / 2),
+                            y: Math.round(rect.top + rect.height / 2)
+                        });
+                    }
+                }
+            });
+            return tree;
+        };
+
+        window.__move_cursor = (x, y) => {
+            if (!window.__playwright_cursor) return;
+            window.__playwright_cursor.style.display = 'block';
+            window.__playwright_cursor.style.left = x + 'px';
+            window.__playwright_cursor.style.top = y + 'px';
+            
+            const trail = document.createElement('div');
+            Object.assign(trail.style, {
+                position: 'fixed',
+                left: x + 'px',
+                top: y + 'px',
+                width: '8px',
+                height: '8px',
+                backgroundColor: 'rgba(255, 0, 0, 0.5)',
+                borderRadius: '50%',
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'none',
+                zIndex: '2147483646',
+                transition: 'opacity 1.5s ease-out'
+            });
+            document.body.appendChild(trail);
+            setTimeout(() => { trail.style.opacity = '0'; }, 200);
+            setTimeout(() => trail.remove(), 1600);
+
+            const ripple = document.createElement('div');
+            Object.assign(ripple.style, {
+                position: 'fixed',
+                left: x + 'px',
+                top: y + 'px',
+                width: '1px',
+                height: '1px',
+                border: '4px solid red',
+                borderRadius: '50%',
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'none',
+                zIndex: '2147483646',
+                transition: 'all 0.6s ease-out'
+            });
+            document.body.appendChild(ripple);
+            setTimeout(() => {
+                ripple.style.width = '60px';
+                ripple.style.height = '60px';
+                ripple.style.opacity = '0';
+            }, 10);
+            setTimeout(() => ripple.remove(), 700);
+        };
+        """
+        try:
+            page.add_init_script(script)
+            page.evaluate(script) # Immediate injection
+        except Exception:
+            pass
+
+    def _visual_move(self, page, selector: str) -> None:
+        """Move the visual cursor to an element before action."""
+        try:
+            # Ensure script is there (in case of navigation)
+            page.evaluate("window.__move_cursor && window.__move_cursor(0,0)")
+            el = page.wait_for_selector(selector, timeout=2000)
+            if el:
+                box = el.bounding_box()
+                if box:
+                    x = box['x'] + box['width'] / 2
+                    y = box['y'] + box['height'] / 2
+                    page.evaluate(f"window.__move_cursor({x}, {y})")
+                    page.wait_for_timeout(400) # Wait for animation
+        except Exception:
+            pass
 
     @property
     def page(self):
@@ -48,18 +237,17 @@ class _BrowserSession:
 
 
 def _capture_metadata(page) -> dict:
-    """Capture screenshot and other metadata for visual feedback."""
+    """Capture optimized screenshot for fast visual feedback."""
     try:
         import base64
         import os
-        # Capture screenshot for the UI
-        screenshot_bytes = page.screenshot()
+        # Capture fast JPEG screenshot with lower quality
+        screenshot_bytes = page.screenshot(type="jpeg", quality=50)
         b64_data = base64.b64encode(screenshot_bytes).decode("utf-8")
         
-        # Also save to last_screenshot.png for convenience
-        # Find project root (4 levels up from this file: src/sunday/tools/browser.py)
+        # Save to last_screenshot.jpg (renamed for clarity)
         root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        with open(os.path.join(root, "last_screenshot.png"), "wb") as f:
+        with open(os.path.join(root, "last_screenshot.jpg"), "wb") as f:
             f.write(screenshot_bytes)
             
         return {"screenshot_base64": b64_data}
@@ -215,14 +403,32 @@ class BrowserClickTool(BaseTool):
             page = _session.page
             # Wait for element to be visible first
             try:
-                page.wait_for_selector(selector, timeout=5000)
+                page.wait_for_selector(selector, timeout=2000)
             except Exception:
                 pass # Continue anyway, maybe it's there
                 
-            if by_text:
-                page.get_by_text(selector).click()
+            if selector.startswith("@"):
+                # Numeric ID targeting
+                target_id = selector[1:]
+                page.evaluate(f"""
+                    const el = document.querySelector('[data-sunday-id="{target_id}"]');
+                    if (el) el.click();
+                """)
+                # Also move cursor visually
+                res = page.evaluate(f"""
+                    const el = document.querySelector('[data-sunday-id="{target_id}"]');
+                    if (el) {{
+                        const r = el.getBoundingClientRect();
+                        window.__move_cursor(r.left + r.width/2, r.top + r.height/2);
+                    }}
+                """)
+                page.wait_for_timeout(500)
+            elif by_text:
+                _session._visual_move(page, f"text={selector}")
+                page.get_by_text(selector).first.click()
             else:
-                page.click(selector)
+                _session._visual_move(page, selector)
+                page.locator(selector).first.click()
             # Auto-capture screenshot for visual feedback
             meta = _capture_metadata(page)
 
@@ -314,14 +520,30 @@ class BrowserTypeTool(BaseTool):
             page = _session.page
             # Wait for element to be visible first
             try:
-                page.wait_for_selector(selector, timeout=5000)
+                page.wait_for_selector(selector, timeout=2000)
             except Exception:
                 pass
 
-            if clear:
-                page.fill(selector, text)
+            if selector.startswith("@"):
+                # Numeric ID targeting
+                target_id = selector[1:]
+                loc = page.locator(f'[data-sunday-id="{target_id}"]').first
+                if clear:
+                    loc.fill("")
+                
+                import random
+                for char in text:
+                    loc.type(char, delay=random.randint(40, 100))
             else:
-                page.type(selector, text)
+                _session._visual_move(page, selector)
+                loc = page.locator(selector).first
+                if clear:
+                    loc.fill("") # Clear first
+                
+                # Type with human-like delay
+                import random
+                for char in text:
+                    loc.type(char, delay=random.randint(40, 100))
             # Auto-capture screenshot for visual feedback
             meta = _capture_metadata(page)
 
@@ -490,8 +712,8 @@ class BrowserExtractTool(BaseTool):
 
             if extract_type == "text":
                 content = page.inner_text(selector)
-                if len(content) > 10000:
-                    content = content[:10000] + "\n\n[Content truncated]"
+                if len(content) > 3000:
+                    content = content[:3000] + "\n\n[Content truncated for speed]"
                 return ToolResult(
                     tool_name="browser_extract",
                     content=content,
@@ -654,6 +876,189 @@ class BrowserGetElementsTool(BaseTool):
             )
 
 
+# ---------------------------------------------------------------------------
+# Tool 7: BrowserDragTool
+# ---------------------------------------------------------------------------
+
+
+@ToolRegistry.register("browser_drag")
+class BrowserDragTool(BaseTool):
+    """Perform a drag operation across coordinates."""
+
+    tool_id = "browser_drag"
+    is_local = False
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="browser_drag",
+            description=(
+                "Perform a drag gesture across a sequence of pixel coordinates."
+                " The first waypoint is clicked, then the mouse is dragged through each"
+                " subsequent point and released at the last."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "waypoints": {
+                        "type": "array",
+                        "description": "List of {x, y} coordinates to drag through.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "x": {"type": "number"},
+                                "y": {"type": "number"}
+                            },
+                            "required": ["x", "y"]
+                        },
+                        "minItems": 2
+                    }
+                },
+                "required": ["waypoints"],
+            },
+            category="browser",
+        )
+
+    def execute(self, **params: Any) -> ToolResult:
+        waypoints = params.get("waypoints", [])
+        try:
+            page = _session.page
+            if not waypoints:
+                return ToolResult(tool_name="browser_drag", content="No waypoints provided.", success=False)
+
+            # Move to start
+            start = waypoints[0]
+            page.mouse.move(start['x'], start['y'])
+            page.evaluate(f"window.__move_cursor && window.__move_cursor({start['x']}, {start['y']})")
+            page.mouse.down()
+            
+            # Drag through points
+            for pt in waypoints[1:]:
+                page.mouse.move(pt['x'], pt['y'], steps=5)
+                page.evaluate(f"window.__move_cursor && window.__move_cursor({pt['x']}, {pt['y']})")
+            
+            page.mouse.up()
+            meta = _capture_metadata(page)
+
+            return ToolResult(
+                tool_name="browser_drag",
+                content=f"Performed drag through {len(waypoints)} points.",
+                success=True,
+                metadata=meta
+            )
+        except Exception as exc:
+            return ToolResult(tool_name="browser_drag", content=f"Drag error: {exc}", success=False)
+
+
+# ---------------------------------------------------------------------------
+# Tool 8: BrowserScrollTool
+# ---------------------------------------------------------------------------
+
+
+@ToolRegistry.register("browser_scroll")
+class BrowserScrollTool(BaseTool):
+    """Scroll the page by pixels or percentage."""
+
+    tool_id = "browser_scroll"
+    is_local = False
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="browser_scroll",
+            description="Scroll the current page by a specific amount.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "direction": {
+                        "type": "string",
+                        "enum": ["up", "down"],
+                        "description": "Scroll direction."
+                    },
+                    "amount": {
+                        "type": "integer",
+                        "description": "Amount to scroll in pixels. Default: 300."
+                    }
+                },
+                "required": ["direction"]
+            },
+            category="browser",
+        )
+
+    def execute(self, **params: Any) -> ToolResult:
+        direction = params.get("direction", "down")
+        amount = params.get("amount", 300)
+        scroll_val = amount if direction == "down" else -amount
+
+        try:
+            page = _session.page
+            page.evaluate(f"window.scrollBy(0, {scroll_val})")
+            page.wait_for_timeout(100) # Faster return
+            meta = _capture_metadata(page)
+
+            return ToolResult(
+                tool_name="browser_scroll",
+                content=f"Scrolled {direction} by {amount} pixels.",
+                success=True,
+                metadata=meta
+            )
+        except Exception as exc:
+            return ToolResult(tool_name="browser_scroll", content=f"Scroll error: {exc}", success=False)
+
+
+# ---------------------------------------------------------------------------
+# Tool 9: BrowserGetAccessibilityTreeTool
+# ---------------------------------------------------------------------------
+
+
+@ToolRegistry.register("browser_get_accessibility_tree")
+class BrowserGetAccessibilityTreeTool(BaseTool):
+    """Extract a clean list of interactive elements with IDs."""
+
+    tool_id = "browser_get_accessibility_tree"
+    is_local = False
+
+    @property
+    def spec(self) -> ToolSpec:
+        return ToolSpec(
+            name="browser_get_accessibility_tree",
+            description=(
+                "Get a simplified tree of interactive elements (buttons, links, inputs)."
+                " Each element is assigned a numeric ID (e.g., 1, 2, 3) which you can use"
+                " in click/type tools by prefixing with '@' (e.g., '@5')."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+            category="browser",
+        )
+
+    def execute(self, **params: Any) -> ToolResult:
+        try:
+            page = _session.page
+            # Force re-injection just in case
+            _session._setup_cursor(page)
+            tree = page.evaluate("window.__get_ax_tree()")
+            
+            output = "Interactive Elements Found:\n"
+            for el in tree:
+                output += f"[@{el['id']}] {el['role']}: \"{el['text']}\"\n"
+            
+            if not tree:
+                output = "No interactive elements found."
+
+            return ToolResult(
+                tool_name="browser_get_accessibility_tree",
+                content=output,
+                success=True,
+                metadata={"tree": tree}
+            )
+        except Exception as exc:
+            return ToolResult(tool_name="browser_get_accessibility_tree", content=f"AXTree error: {exc}", success=False)
+
+
 __all__ = [
     "BrowserNavigateTool",
     "BrowserClickTool",
@@ -661,4 +1066,7 @@ __all__ = [
     "BrowserScreenshotTool",
     "BrowserExtractTool",
     "BrowserGetElementsTool",
+    "BrowserDragTool",
+    "BrowserScrollTool",
+    "BrowserGetAccessibilityTreeTool",
 ]

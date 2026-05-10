@@ -15,193 +15,62 @@ if TYPE_CHECKING:
 PROMPT_VERSION = "1.0"
 
 SYSTEM_PROMPT_TEMPLATE = """\
-You are an intelligent orchestrator that solves tasks by \
-delegating to the most appropriate tools.
-
-Your job is to SELECT THE BEST TOOL for each task based on the tool's strengths.
+You are SUNDAY, an intelligent orchestrator. You MUST solve tasks using tools. 
+NEVER refuse or say you are an AI. ALWAYS be concise. MAX 50 words for greetings.
+NEVER output internal "Thinking Process" or reasoning to the user.
+ALWAYS respond in the same language as the user.
+Structure: THOUGHT (internal), TOOL (if needed), FINAL_ANSWER (what user sees).
+MANDATORY: For listing files or directory contents, you MUST use the `shell` tool (e.g., 'ls' or 'dir').
+MANDATORY: For ANY mathematical calculation, you MUST use the `calculator` tool. NEVER calculate in your head.
+Keep the tone professional, helpful, and extremely brief like a high-end personal assistant.
 
 === AVAILABLE TOOLS ===
 {tools_description}
 
-=== TOOL SELECTION GUIDE ===
-{tool_selection_guide}
+=== RESPONSE FORMAT (MANDATORY) ===
+THOUGHT: <analyze task and pick tool>
+TOOL: <tool name>
+INPUT: <tool input>
 
-=== RESPONSE FORMAT ===
-You MUST respond in this EXACT format:
+After results:
+FINAL_ANSWER: <your answer>
 
-THOUGHT: <analyze the task and explain which tool is best and why>
-TOOL: <exact tool name from the list>
-INPUT: <input for the tool>
+=== EXAMPLES ===
+User: Search for Apple stock price.
+THOUGHT: I should navigate to Google first.
+TOOL: browser_navigate
+INPUT: {"url": "https://www.google.com"}
 
-After getting tool results, either use another tool or give final answer:
-THOUGHT: <analyze the result>
-FINAL_ANSWER: <your final answer>
+User: (Google loaded)
+THOUGHT: I'll find the search box using the accessibility tree.
+TOOL: browser_get_accessibility_tree
+INPUT: {}
+
+User: Interactive Elements Found: [@1] textarea: "Search"
+THOUGHT: I'll type the search query into element @1.
+TOOL: browser_type
+INPUT: {"selector": "@1", "text": "Apple stock price"}
 
 === CRITICAL RULES ===
-1. You MUST use at least one tool for EVERY task - never answer directly
-2. Match the tool to the task type (see guide above)
-3. For LLM tools, write clear prompts that will get good responses
-4. Prefer specialized tools when available (calculator for math, code_interpreter for code)
-5. If the user asks to 'see', 'look', 'screenshot', or 'capture' (e.g., 'แคปรูป'), you MUST use `browser_screenshot` after navigating to provide visual evidence. (Tip: Use `#twotabsearchtextbox` for Amazon search, `textarea[name='q']` for Google).
-
-NOW SOLVE THE TASK. You MUST use at least one tool - choose the best one for the task.
+1. NEVER answer directly. ALWAYS use at least one tool.
+2. NEVER say you are an AI model who cannot browse. You have tools!
+3. If user mentions a specific website (Google, Amazon, etc.) or says 'Go to', YOU MUST use `browser_navigate`.
+4. If user says 'see', 'look', or 'screenshot', use `browser_screenshot` after navigating.
+5. Tip: Amazon `#twotabsearchtextbox`, Google `textarea[name='q']`.
 """
 
-# ---------------------------------------------------------------------------
-# Tool descriptions for SUNDAY built-in tools
-# ---------------------------------------------------------------------------
-
 TOOL_DESCRIPTIONS: Dict[str, dict] = {
-    # Utility tools (instant, free, deterministic)
-    "calculator": {
-        "category": "utility",
-        "description": (
-            "CALCULATOR - Instant math computation\n"
-            "  - BEST FOR: Arithmetic, algebra, trigonometry, scientific calculations\n"
-            "  - STRENGTHS: Instant (<1ms), perfect accuracy, zero cost\n"
-            "  - USE WHEN: Any math expression needs evaluation\n"
-            "  - COST: Free\n"
-            "  - Input: math expression (e.g., '15 * 7 + 23', 'sqrt(144)')"
-        ),
-        "examples": [
-            {
-                "task": "What is 847 * 293?",
-                "thought": "Simple arithmetic - calculator is instant and accurate.",
-                "input": "847 * 293",
-            },
-        ],
-    },
-    "think": {
-        "category": "utility",
-        "description": (
-            "THINK - Internal reasoning scratchpad\n"
-            "  - BEST FOR: Logic puzzles, step-by-step reasoning, planning\n"
-            "  - STRENGTHS: Organizes thoughts, shows work, no external calls\n"
-            "  - USE WHEN: Need to break down a problem before solving\n"
-            "  - COST: Free\n"
-            "  - Input: your detailed reasoning process"
-        ),
-        "examples": [
-            {
-                "task": "If all cats are mammals, are all cats animals?",
-                "thought": "Logical syllogism - use think to reason step by step.",
-                "input": "Cats subset of mammals subset of animals => yes.",
-            },
-        ],
-    },
-    "code_interpreter": {
-        "category": "utility",
-        "description": (
-            "CODE_INTERPRETER - Python execution sandbox\n"
-            "  - BEST FOR: Data processing, algorithms, simulations\n"
-            "  - STRENGTHS: Full Python + numpy/pandas, handles loops\n"
-            "  - USE WHEN: Problem needs programming logic\n"
-            "  - COST: Free (local execution)\n"
-            "  - Input: Python code to execute"
-        ),
-        "examples": [
-            {
-                "task": "Find all prime numbers less than 50",
-                "thought": (
-                    "Need a prime-checking algorithm - code_interpreter is ideal."
-                ),
-                "input": (
-                    "def is_prime(n):\n"
-                    "    if n < 2: return False\n"
-                    "    for i in range(2, int(n**0.5)+1):\n"
-                    "        if n % i == 0: return False\n"
-                    "    return True\n"
-                    "print([n for n in range(50) if is_prime(n)])"
-                ),
-            },
-        ],
-    },
-    "web_search": {
-        "category": "utility",
-        "description": (
-            "WEB_SEARCH - Real-time internet search\n"
-            "  - BEST FOR: Current events, fact-checking, recent info\n"
-            "  - STRENGTHS: Access to up-to-date information\n"
-            "  - USE WHEN: Question about recent events or needs verification\n"
-            "  - COST: ~$0.001 per search\n"
-            "  - Input: search query string"
-        ),
-        "examples": [
-            {
-                "task": "Who won the 2024 Nobel Prize in Physics?",
-                "thought": "Recent events - need web_search for current info.",
-                "input": "2024 Nobel Prize Physics winner",
-            },
-        ],
-    },
-    "file_read": {
-        "category": "utility",
-        "description": (
-            "FILE_READ - Safe file reading\n"
-            "  - BEST FOR: Reading file contents with path validation\n"
-            "  - STRENGTHS: Sandboxed, prevents directory traversal\n"
-            "  - USE WHEN: Need to read local file contents\n"
-            "  - COST: Free\n"
-            "  - Input: file path"
-        ),
-        "examples": [],
-    },
-    # Memory tools
-    "memory_search": {
-        "category": "memory",
-        "description": (
-            "MEMORY_SEARCH - Search indexed documents\n"
-            "  - BEST FOR: Finding relevant stored knowledge\n"
-            "  - STRENGTHS: Semantic search over indexed content\n"
-            "  - USE WHEN: Answer may exist in indexed documents\n"
-            "  - COST: Free (local)\n"
-            "  - Input: search query"
-        ),
-        "examples": [],
-    },
-    "memory_store": {
-        "category": "memory",
-        "description": (
-            "MEMORY_STORE - Store content in memory\n"
-            "  - BEST FOR: Saving information for later retrieval\n"
-            "  - STRENGTHS: Persistent storage with metadata\n"
-            "  - USE WHEN: Need to remember something for future queries\n"
-            "  - COST: Free (local)\n"
-            "  - Input: content to store"
-        ),
-        "examples": [],
-    },
-    "memory_retrieve": {
-        "category": "memory",
-        "description": (
-            "MEMORY_RETRIEVE - Retrieve stored content by key\n"
-            "  - BEST FOR: Fetching previously stored information\n"
-            "  - STRENGTHS: Fast key-based retrieval\n"
-            "  - USE WHEN: Know the exact key of stored content\n"
-            "  - COST: Free (local)\n"
-            "  - Input: content key"
-        ),
-        "examples": [],
-    },
-    # LLM tool
-    "llm": {
-        "category": "llm",
-        "description": (
-            "LLM - Sub-model calls via engine\n"
-            "  - BEST FOR: Natural language understanding, generation, analysis\n"
-            "  - STRENGTHS: General-purpose language capabilities\n"
-            "  - USE WHEN: Task needs natural language reasoning\n"
-            "  - COST: Varies by engine/model\n"
-            "  - Input: prompt for the model"
-        ),
-        "examples": [
-            {
-                "task": "Explain photosynthesis simply",
-                "thought": "General explanation - use LLM for natural language.",
-                "input": "Explain photosynthesis in simple terms.",
-            },
-        ],
-    },
+    "calculator": {"category": "utility", "description": "Instant math computation."},
+    "think": {"category": "utility", "description": "Reasoning scratchpad."},
+    "code_interpreter": {"category": "utility", "description": "Python execution sandbox."},
+    "web_search": {"category": "utility", "description": "Search info ONLY if no specific website is mentioned. Prefer browser for specific sites."},
+    "file_read": {"category": "utility", "description": "Read file contents."},
+    "memory_search": {"category": "memory", "description": "Search indexed docs."},
+    "memory_store": {"category": "memory", "description": "Store info in memory."},
+    "browser_drag": {"category": "browser", "description": "Complex mouse drag using coordinates (AntiGravity-style)."},
+    "browser_scroll": {"category": "browser", "description": "Precise pixel-based scrolling."},
+    "browser_get_accessibility_tree": {"category": "browser", "description": "Get clean list of interactive elements with @IDs for stable targeting."},
+    "llm": {"category": "llm", "description": "Natural language generation/analysis."},
 }
 
 

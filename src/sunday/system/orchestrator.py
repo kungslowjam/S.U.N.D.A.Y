@@ -155,6 +155,9 @@ class QueryOrchestrator:
         if getattr(agent_cls, "accepts_tools", False):
             agent_kwargs["tools"] = agent_tools
             agent_kwargs["max_turns"] = s.config.agent.max_turns
+            # Pass mode (structured vs function_calling) from config
+            if hasattr(s.config.agent, "mode"):
+                agent_kwargs["mode"] = s.config.agent.mode
             examples = getattr(s, "_skill_few_shot_examples", None)
             if examples:
                 agent_kwargs["skill_few_shot_examples"] = examples
