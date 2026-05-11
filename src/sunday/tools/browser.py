@@ -17,6 +17,11 @@ class _BrowserSession:
         self._playwright = None
         self._browser = None
         self._page = None
+        # Dedup state: prevent the agent from calling the same tool and getting identical results
+        self._last_extract_hash: str = ""
+        self._last_elements_hash: str = ""
+        self._extract_repeat_count: int = 0
+        self._elements_repeat_count: int = 0
 
     @property
     def page(self):
@@ -590,6 +595,11 @@ class BrowserNavigateTool(BaseTool):
 
         try:
             page = _session.page
+            # Reset dedup state — new page means new content
+            _session._last_extract_hash = ""
+            _session._last_elements_hash = ""
+            _session._extract_repeat_count = 0
+            _session._elements_repeat_count = 0
             page.goto(url, wait_until=wait_for)
             
             # Detect Cloudflare / Bot detection / Security Verification
@@ -1101,6 +1111,23 @@ class BrowserExtractTool(BaseTool):
                 content = page.inner_text(selector)
                 if len(content) > 3000:
                     content = content[:3000] + "\n\n[Content truncated for speed]"
+                
+                # Dedup guard
+                import hashlib
+                content_hash = hashlib.md5(content[:500].encode()).hexdigest()
+                if content_hash == _session._last_extract_hash:
+                    _session._extract_repeat_count += 1
+                    if _session._extract_repeat_count >= 2:
+                        return ToolResult(
+                            tool_name="browser_extract",
+                            content="STOP: Page content is identical to the last extraction. You already have this data. Summarize and present your findings now.",
+                            success=True,
+                            metadata={"deduplicated": True},
+                        )
+                else:
+                    _session._last_extract_hash = content_hash
+                    _session._extract_repeat_count = 0
+                
                 return ToolResult(
                     tool_name="browser_extract",
                     content=content,
@@ -1266,6 +1293,23 @@ class BrowserGetElementsTool(BaseTool):
             }
             """
             results = page.evaluate(script, root_selector)
+            
+            # Dedup guard: detect if elements are identical to last call
+            import hashlib
+            elements_sig = str([(r.get('tag'), r.get('text','')[:30], r.get('selector')) for r in results[:10]])
+            elements_hash = hashlib.md5(elements_sig.encode()).hexdigest()
+            if elements_hash == _session._last_elements_hash:
+                _session._elements_repeat_count += 1
+                if _session._elements_repeat_count >= 2:
+                    return ToolResult(
+                        tool_name="browser_get_elements",
+                        content="STOP: Elements are identical to the last call. The page has not changed. Try a different action (click, navigate, or summarize your findings).",
+                        success=True,
+                        metadata={"deduplicated": True},
+                    )
+            else:
+                _session._last_elements_hash = elements_hash
+                _session._elements_repeat_count = 0
             
             # Format results as a readable string
             lines = [f"Found {len(results)} interactive elements:"]

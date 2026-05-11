@@ -11,34 +11,48 @@ from sunday.tools._stubs import BaseTool, ToolSpec
 
 
 # ---------------------------------------------------------------------------
-# LLMProxy: A robust wrapper to satisfy browser-use and Pydantic
+# LLMProxy: Duck-typed wrapper that satisfies browser-use without Pydantic
 # ---------------------------------------------------------------------------
 class LLMProxy:
-    """Wraps ChatOpenAI to provide required fields and async methods for browser-use."""
+    """
+    Wraps ChatOpenAI to guarantee all attributes browser-use expects:
+    - .provider (str)
+    - .model (str)
+    - .invoke(...)
+    - .ainvoke(...)
+    
+    Uses object.__setattr__ to avoid any Pydantic interference.
+    Uses object.__getattribute__ inside __getattr__ to avoid recursion.
+    """
     def __init__(self, base_url: str, model: str):
         from langchain_openai import ChatOpenAI
-        self._llm = ChatOpenAI(
+        # Use object.__setattr__ to bypass any descriptor magic
+        object.__setattr__(self, '_llm', ChatOpenAI(
             base_url=base_url,
             api_key="sk-no-key-needed",
             model=model,
-            max_tokens=1024
-        )
-        # browser-use reads this property
-        self.provider = "openai"
+            max_tokens=1024,
+        ))
+        # Explicitly set fields browser-use reads
+        object.__setattr__(self, 'provider', 'openai')
+        object.__setattr__(self, 'model', model)
+        object.__setattr__(self, 'model_name', model)
 
     def invoke(self, *args, **kwargs):
-        return self._llm.invoke(*args, **kwargs)
+        return object.__getattribute__(self, '_llm').invoke(*args, **kwargs)
 
     async def ainvoke(self, *args, **kwargs):
-        """The critical missing piece for browser-use."""
+        """Async invoke — wraps sync in executor."""
+        llm = object.__getattribute__(self, '_llm')
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, lambda: self._llm.invoke(*args, **kwargs)
-        )
-    
-    # Forward other common calls if needed
+        return await loop.run_in_executor(None, lambda: llm.invoke(*args, **kwargs))
+
     def __getattr__(self, name):
-        return getattr(self._llm, name)
+        """Forward any other attribute access to the wrapped ChatOpenAI."""
+        try:
+            return getattr(object.__getattribute__(self, '_llm'), name)
+        except AttributeError:
+            raise AttributeError(f"'LLMProxy' object has no attribute '{name}'")
 
 
 @ToolRegistry.register("browser_use_task")
@@ -53,7 +67,7 @@ class BrowserUseTaskTool(BaseTool):
             name="browser_use_task",
             description=(
                 "Executes a complex, multi-step autonomous browser task using the browser-use library."
-                " Use this for ANY multi-step web search or data extraction task. It is the preferred way."
+                " Use this for ANY multi-step web search or data extraction task."
             ),
             parameters={
                 "type": "object",
@@ -75,10 +89,9 @@ class BrowserUseTaskTool(BaseTool):
 
         try:
             from browser_use import Agent
-            # AI Engine is on 8081
             llm = LLMProxy(base_url="http://127.0.0.1:8081/v1", model="local-model")
         except Exception as e:
-            return ToolResult(tool_name="browser_use_task", content=f"Initialization error: {e}", success=False)
+            return ToolResult(tool_name="browser_use_task", content=f"Init error: {e}", success=False)
 
         async def _run():
             agent = Agent(task=task, llm=llm)
@@ -108,7 +121,7 @@ class BrowserUseTaskTool(BaseTool):
         if "error" in result_holder:
             return ToolResult(
                 tool_name="browser_use_task",
-                content=f"Error executing browser-use task: {result_holder['error']}",
+                content=f"Error: {result_holder['error']}",
                 success=False,
             )
         return ToolResult(
