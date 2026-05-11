@@ -799,6 +799,15 @@ class BrowserClickTool(BaseTool):
                     return ToolResult(tool_name="browser_click", content=f"Clicked text '{clean_text}' via coordinates", success=True)
 
             # 3. Target by Standard CSS Selector
+            # 🛡️ Escape React-generated IDs with special chars (e.g., #:rs:)
+            import re as _re
+            if _re.search(r'#[^\s]*[:.]', selector):
+                # Extract the ID and convert to attribute selector
+                id_match = _re.match(r'#(.+)', selector)
+                if id_match:
+                    raw_id = id_match.group(1)
+                    selector = f'[id="{raw_id}"]'
+            
             try:
                 page.wait_for_selector(selector, timeout=3000, state="visible")
                 el = page.locator(selector).first
@@ -1117,7 +1126,7 @@ class BrowserExtractTool(BaseTool):
                 content_hash = hashlib.md5(content[:500].encode()).hexdigest()
                 if content_hash == _session._last_extract_hash:
                     _session._extract_repeat_count += 1
-                    if _session._extract_repeat_count >= 2:
+                    if _session._extract_repeat_count >= 1:
                         return ToolResult(
                             tool_name="browser_extract",
                             content="STOP: Page content is identical to the last extraction. You already have this data. Summarize and present your findings now.",
@@ -1300,7 +1309,7 @@ class BrowserGetElementsTool(BaseTool):
             elements_hash = hashlib.md5(elements_sig.encode()).hexdigest()
             if elements_hash == _session._last_elements_hash:
                 _session._elements_repeat_count += 1
-                if _session._elements_repeat_count >= 2:
+                if _session._elements_repeat_count >= 1:
                     return ToolResult(
                         tool_name="browser_get_elements",
                         content="STOP: Elements are identical to the last call. The page has not changed. Try a different action (click, navigate, or summarize your findings).",

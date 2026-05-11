@@ -21,7 +21,7 @@ repetition_penalty = 1.1
 [agent]
 default_agent = "orchestrator"
 mode = "structured"
-max_turns = 40
+max_turns = 15
 max_tokens = 4096
 tools = "code_interpreter,openalex_search,web_search,file_read,file_write,shell,skills,browser_navigate,browser_click,browser_type,browser_screenshot,browser_extract,browser_get_elements,browser_drag,browser_scroll,browser_get_accessibility_tree,browser_reset,browser_use_task,git,calculator,think"
 objective = """You are SUNDAY, an autonomous AI assistant. Follow these rules strictly:
