@@ -22,6 +22,7 @@ class _BrowserSession:
         self._last_elements_hash: str = ""
         self._extract_repeat_count: int = 0
         self._elements_repeat_count: int = 0
+        self._scroll_count: int = 0  # Scroll spam limiter
 
     @property
     def page(self):
@@ -600,6 +601,7 @@ class BrowserNavigateTool(BaseTool):
             _session._last_elements_hash = ""
             _session._extract_repeat_count = 0
             _session._elements_repeat_count = 0
+            _session._scroll_count = 0
             page.goto(url, wait_until=wait_for)
             
             # Detect Cloudflare / Bot detection / Security Verification
@@ -1207,9 +1209,10 @@ class BrowserExtractTool(BaseTool):
                 # If we detect structured listing data, tell the model to summarize
                 has_ratings = bool(_re.search(r'Scored \d+\.\d+', content) or _re.search(r'\d\.\d\n.+\n(Superb|Very good|Good|Exceptional)', content))
                 has_prices = bool(_re.search(r'(AUD|USD|JPY|EUR|฿|¥)\s*[\d,]+', content))
+                has_listings = bool(_re.search(r'properties found', content) or _re.search(r'Opens in new window', content))
                 
-                if has_ratings and has_prices:
-                    content += "\n\n>>> DATA RETRIEVED SUCCESSFULLY. Parse the above listings, filter and sort as requested, then present your answer to the user. Do NOT call any more browser tools. <<<"
+                if has_ratings or has_prices or has_listings:
+                    content += "\n\n>>> DATA RETRIEVED SUCCESSFULLY. You have hotel/listing data above. Parse it, filter by the user's criteria (e.g. 9+ rating), sort as requested, then present your answer. Do NOT call any more browser tools. <<<""
                 
                 # Dedup guard
                 import hashlib
@@ -1547,16 +1550,25 @@ class BrowserScrollTool(BaseTool):
         direction = params.get("direction", "down")
         amount = params.get("amount", 300)
         scroll_val = amount if direction == "down" else -amount
+        
+        # Scroll spam limiter
+        _session._scroll_count += 1
+        if _session._scroll_count > 2:
+            return ToolResult(
+                tool_name="browser_scroll",
+                content="ERROR: You have scrolled too many times. Use browser_extract to read the current page content, then summarize your findings.",
+                success=False,
+            )
 
         try:
             page = _session.page
             page.evaluate(f"window.scrollBy(0, {scroll_val})")
-            page.wait_for_timeout(100) # Faster return
+            page.wait_for_timeout(100)
             meta = _capture_metadata(page)
 
             return ToolResult(
                 tool_name="browser_scroll",
-                content=f"Scrolled {direction} by {amount} pixels.",
+                content=f"Scrolled {direction} by {amount} pixels. Use browser_extract to read the visible content.",
                 success=True,
                 metadata=meta
             )
