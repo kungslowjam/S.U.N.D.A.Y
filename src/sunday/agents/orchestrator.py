@@ -86,6 +86,46 @@ class OrchestratorAgent(ToolUsingAgent):
             return self._run_structured(input, context, **kwargs)
         return self._run_function_calling(input, context, **kwargs)
 
+    @property
+    def _config(self):
+        from sunday.core.config import load_config
+        return load_config()
+
+    def _generate(self, messages: List[Message]) -> dict:
+        """Centralized generation with Hybrid Routing.
+        
+        Logic:
+        1. If provider is 'hybrid':
+           - Use 'openrouter' for the first steps (Planning & Research).
+           - Switch to 'local' for summarization if raw data (>>> DATA RETRIEVED) is found.
+        2. Otherwise, use the configured provider.
+        """
+        provider = self._config.intelligence.provider
+        
+        if provider == "hybrid":
+            # Rule: Use Cloud for research, Local for summary
+            last_msg_content = messages[-1].content if messages else ""
+            
+            # If we just extracted data, or have been chatting a lot, use Local to summarize
+            if ">>> DATA RETRIEVED" in last_msg_content or len(messages) > 10:
+                current_provider = "local"
+                model = self._config.intelligence.fallback_model
+            else:
+                current_provider = "openrouter"
+                model = self._config.intelligence.default_model
+        else:
+            current_provider = provider
+            model = self._model # Use the model assigned to this agent
+
+        return self._engine.generate(
+            messages,
+            model=model,
+            temperature=self._temperature,
+            max_tokens=self._max_tokens,
+            # We add a hint for the engine to know which provider to route to
+            provider=current_provider 
+        )
+
     # ------------------------------------------------------------------
     # Structured mode (THOUGHT/TOOL/INPUT/FINAL_ANSWER)
     # ------------------------------------------------------------------
@@ -109,6 +149,11 @@ class OrchestratorAgent(ToolUsingAgent):
             sys_prompt = build_system_prompt(tools=self._tools)
 
         messages = self._build_messages(input, context, system_prompt=sys_prompt)
+
+        # === SMART HARNESS: Pre-calculate optimized URLs for known domains ===
+        smart_hint = self._generate_smart_url(input)
+        if smart_hint:
+            messages.append(Message(role=Role.USER, content=f"HINT: To be faster, use this direct URL immediately: {smart_hint}"))
 
         all_tool_results: list[ToolResult] = []
         turns = 0
@@ -253,6 +298,11 @@ class OrchestratorAgent(ToolUsingAgent):
 
         # Build initial messages
         messages = self._build_messages(input, context)
+
+        # === SMART HARNESS: Pre-calculate optimized URLs for known domains ===
+        smart_hint = self._generate_smart_url(input)
+        if smart_hint:
+            messages.append(Message(role=Role.USER, content=f"HINT: To be faster, use this direct URL immediately: {smart_hint}"))
 
         # Get OpenAI-format tool definitions
         openai_tools = self._executor.get_openai_tools() if self._tools else []
@@ -593,6 +643,56 @@ class OrchestratorAgent(ToolUsingAgent):
         
         header = f"🏨 ผลการค้นหาโรงแรมย่าน Shinjuku (คะแนน {min_score}+):\n\n"
         return header + "\n\n".join(result_lines) + "\n\n📌 *หมายเหตุ: ข้อมูลนี้เป็นราคาเริ่มต้นหรือราคาประเมิน โปรดเช็คราคาจริงโดยระบุวันที่เข้าพักอีกครั้งครับ*"
+
+    def _generate_smart_url(self, user_input: str) -> Optional[str]:
+        """Generate an optimized search URL based on the user's input to bypass homepages."""
+        input_lower = user_input.lower()
+        import re as _re
+        
+        # 1. Booking.com Logic
+        if "booking" in input_lower:
+            # Extract city
+            city_match = _re.search(r'(?:ใน|at|in|ย่าน|เมือง)\s*([a-zA-Zก-ฮ]+)', user_input)
+            city = city_match.group(1) if city_match else "Tokyo"
+            
+            # Extract dates (e.g. 20-22 พ.ค. or 2025-05-20)
+            checkin = ""
+            checkout = ""
+            
+            # Try to find dates like 20-22
+            date_range = _re.search(r'(\d{1,2})[-ถึง\s]+(\d{1,2})\s*([a-zA-Zก-ฮ.]+)', input_lower)
+            if date_range:
+                d1, d2, month = date_range.groups()
+                # Simple month mapper for 2025
+                months = {"ม.ค.": "01", "ก.พ.": "02", "มี.ค.": "03", "เม.ย.": "04", "พ.ค.": "05", "มิ.ย.": "06", 
+                          "ก.ค.": "07", "ส.ค.": "08", "ก.ย.": "09", "ต.ค.": "10", "พ.ย.": "11", "ธ.ค.": "12",
+                          "may": "05", "june": "06", "july": "07"}
+                m_num = "05" # Default to May
+                for k, v in months.items():
+                    if k in month: m_num = v; break
+                
+                checkin = f"2025-{m_num}-{int(d1):02d}"
+                checkout = f"2025-{m_num}-{int(d2):02d}"
+            
+            # Extract stars
+            nflt = ""
+            if "5 ดาว" in user_input or "5 star" in input_lower:
+                nflt = "&nflt=class%3D5"
+            elif "4 ดาว" in user_input or "4 star" in input_lower:
+                nflt = "&nflt=class%3D4"
+            
+            url = f"https://www.booking.com/searchresults.html?ss={city}"
+            if checkin: url += f"&checkin={checkin}&checkout={checkout}"
+            if nflt: url += nflt
+            return url
+            
+        # 2. Amazon.co.jp Logic
+        if "amazon" in input_lower:
+            query_match = _re.search(r'(?:หา|search for|find)\s*([a-zA-Zก-ฮ\s]+)', user_input)
+            if query_match:
+                return f"https://www.amazon.co.jp/s?k={query_match.group(1).strip()}"
+                
+        return None
 
 
 __all__ = ["OrchestratorAgent"]

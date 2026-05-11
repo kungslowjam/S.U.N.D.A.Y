@@ -3,10 +3,19 @@
 # ═══════════════════════════════════════════════════════════════
 
 [intelligence]
-default_model = "gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+default_model = "anthropic/claude-3.5-sonnet"
+# Alternative Cloud Models (via OpenRouter):
+# default_model = "anthropic/claude-3.5-sonnet"
+# default_model = "meta-llama/llama-3.1-405b-instruct"
+# default_model = "google/gemini-pro-1.5"
 fallback_model = "gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
 preferred_engine = "llamacpp"
-provider = "local"
+provider = "hybrid" # options: local, openrouter, hybrid, openai, anthropic, google
+
+[intelligence.openrouter]
+api_key = "" # SET THIS IN YOUR ENVIRONMENT: $env:OPENROUTER_API_KEY="..."
+base_url = "https://openrouter.ai/api/v1"
+model = "anthropic/claude-3.5-sonnet"
 
 # Generation defaults
 temperature = 0.1
