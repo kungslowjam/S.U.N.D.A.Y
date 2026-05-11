@@ -1117,9 +1117,99 @@ class BrowserExtractTool(BaseTool):
             page = _session.page
 
             if extract_type == "text":
-                content = page.inner_text(selector)
+                raw = page.inner_text(selector)
+                
+                # ═══ Smart Content Cleaner ═══
+                # Strip common UI noise that drowns out actual data
+                import re as _re
+                lines = raw.split('\n')
+                cleaned_lines = []
+                skip_mode = False
+                
+                for line in lines:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    
+                    # Skip calendar grids
+                    if stripped in ('Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'):
+                        skip_mode = True
+                        continue
+                    if skip_mode and _re.match(r'^\d{1,2}$', stripped):
+                        continue
+                    if skip_mode and stripped in ('Calendar', "I'm flexible", 'Exact dates'):
+                        continue
+                    if 'days' == stripped or stripped in ('1 day', '2 days', '3 days', '7 days'):
+                        skip_mode = False
+                        continue
+                    
+                    # Skip navigation noise
+                    noise_exact = {
+                        'Skip to main content', 'List your property', 'Register',
+                        'Sign in', 'Stays', 'Flights', 'Flight + Hotel', 'Car rental',
+                        'Attractions', 'Airport taxis', 'Home', 'Show on map',
+                        'Filter by:', 'Popular filters', 'Smart filters',
+                        'What are you looking for?', 'Find properties',
+                        'Property type', 'Property rating', 'Facilities',
+                        'Room facilities', 'Review score', 'Neighbourhood',
+                        'Travel group', 'Brands', 'Fun things to do',
+                        'Entire places', 'Certifications', 'Property accessibility',
+                        'Room accessibility', 'Show all 13', 'Show all 14',
+                        'Show all 20', 'Show all 25', 'List', 'Grid',
+                        'Find high-quality hotels and holiday rentals',
+                        "I'm travelling for work", 'Check-in date', 'Check-out date',
+                    }
+                    if stripped in noise_exact:
+                        continue
+                    
+                    # Skip filter counts like "Hotels\n262" or "5 stars\n10"
+                    if _re.match(r'^(Hotels|Apartments|Villas|Hostels|Ryokans|Guest houses|Chalets|Capsule hotels|Homestays|Holiday homes|Love hotels)\s*$', stripped):
+                        continue
+                    if _re.match(r'^\d{1,4}$', stripped) and len(stripped) <= 4:
+                        continue
+                    if _re.match(r'^\d+ stars?$', stripped):
+                        continue
+                    if _re.match(r'^(Superb|Very good|Good|Pleasant): \d\+$', stripped):
+                        continue
+                    
+                    # Skip accessibility/facility labels
+                    if any(kw in stripped.lower() for kw in [
+                        'wheelchair', 'grab rails', 'tactile signs', 'braille',
+                        'shower chair', 'roll-in shower', 'lowered sink', 'raised toilet',
+                        'emergency cord', 'elevator', 'ground floor', 'adapted bath',
+                        'walk-in shower', 'auditory guidance', 'sustainability',
+                        'massage chair', 'bicycle rental', 'entire homes',
+                        'pets allowed', 'adults only', 'lgbtq'
+                    ]):
+                        continue
+                    
+                    # Skip brand names
+                    if any(brand in stripped for brand in [
+                        'APA Hotels', 'Tokyu Stay', 'LiveMax', 'WHG HOTELS',
+                        'Citadines', 'Pan Pacific', 'Toyoko Inn', 'Hilton',
+                        'Daiwa Roynet', 'Iconia'
+                    ]):
+                        continue
+                    
+                    # Skip currency/locale buttons
+                    if stripped in ('AUD', 'USD', 'EUR', 'GBP', 'JPY'):
+                        continue
+                    
+                    skip_mode = False
+                    cleaned_lines.append(stripped)
+                
+                content = '\n'.join(cleaned_lines)
+                
                 if len(content) > 3000:
-                    content = content[:3000] + "\n\n[Content truncated for speed]"
+                    content = content[:3000] + "\n\n[Content truncated]"
+                
+                # ═══ Auto-Directive ═══
+                # If we detect structured listing data, tell the model to summarize
+                has_ratings = bool(_re.search(r'Scored \d+\.\d+', content) or _re.search(r'\d\.\d\n.+\n(Superb|Very good|Good|Exceptional)', content))
+                has_prices = bool(_re.search(r'(AUD|USD|JPY|EUR|฿|¥)\s*[\d,]+', content))
+                
+                if has_ratings and has_prices:
+                    content += "\n\n>>> DATA RETRIEVED SUCCESSFULLY. Parse the above listings, filter and sort as requested, then present your answer to the user. Do NOT call any more browser tools. <<<"
                 
                 # Dedup guard
                 import hashlib
@@ -1129,8 +1219,8 @@ class BrowserExtractTool(BaseTool):
                     if _session._extract_repeat_count >= 1:
                         return ToolResult(
                             tool_name="browser_extract",
-                            content="STOP: Page content is identical to the last extraction. You already have this data. Summarize and present your findings now.",
-                            success=True,
+                            content="ERROR: Identical page content. You already have the data. STOP calling tools and summarize your findings NOW.",
+                            success=False,
                             metadata={"deduplicated": True},
                         )
                 else:
@@ -1312,8 +1402,8 @@ class BrowserGetElementsTool(BaseTool):
                 if _session._elements_repeat_count >= 1:
                     return ToolResult(
                         tool_name="browser_get_elements",
-                        content="STOP: Elements are identical to the last call. The page has not changed. Try a different action (click, navigate, or summarize your findings).",
-                        success=True,
+                        content="ERROR: Page unchanged. Do NOT call browser_get_elements again. Use browser_click, browser_extract, or present your answer.",
+                        success=False,
                         metadata={"deduplicated": True},
                     )
             else:
