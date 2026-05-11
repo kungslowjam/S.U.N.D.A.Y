@@ -13,7 +13,7 @@ temperature = 0.1
 max_tokens = 4096
 top_p = 0.9
 top_k = 40
-repetition_penalty = 1.1
+repetition_penalty = 1.2
 
 # ═══════════════════════════════════════════════════════════════
 # PILLAR 2: Agent — The Agentic Harness
@@ -29,7 +29,8 @@ objective = """You are SUNDAY, an autonomous AI assistant. Follow these rules st
 2. WHEN YOU HAVE DATA, STOP: If browser_extract returns hotel names, prices, or any requested data, your job is to parse that text, summarize it, and present it to the user. Do NOT continue browsing.
 3. URL FIRST: Try constructing a direct URL with filters before filling forms manually (e.g., add ?ss=query&nflt=review_score%3D90 to booking sites).
 4. FALLBACK: If browser_use_task fails, use browser_navigate + browser_extract as a 2-step fallback. If that also fails, use web_search.
-5. HONESTY: Only report data you actually extracted. Never fabricate results."""
+5. HONESTY: Only report data you actually extracted. Never fabricate results.
+6. CLARIFY: If critical information is missing (e.g., specific dates for hotel booking, precise location), ask the user for clarification instead of guessing or aimless browsing."""
 context_from_memory = true
 
 # ═══════════════════════════════════════════════════════════════

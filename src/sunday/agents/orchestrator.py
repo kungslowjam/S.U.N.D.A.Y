@@ -580,7 +580,7 @@ class OrchestratorAgent(ToolUsingAgent):
         display = filtered[:top_n]
         
         if not display:
-            return f"พบโรงแรม {len(entries)} แห่งในหน้านี้ แต่อันที่คะแนนสูงกว่า {min_score} ยังไม่แสดงราคาหรือข้อมูลไม่ครบ โปรดระบุวันที่เข้าพักเพื่อให้ระบบดึงราคามาเปรียบเทียบได้แม่นยำขึ้นครับ"
+            return f"พบโรงแรม {len(entries)} แห่งในย่าน Shinjuku แต่อันที่มีคะแนน {min_score}+ ยังไม่แสดงราคา (อาจเป็นเพราะยังไม่ระบุวันที่เช็คอิน)\n\n**โรงแรมแนะนำที่มีคะแนนสูง:**\n" + "\n".join([f"- {e['name']} (คะแนน {e['score']})" for e in entries[:3]]) + "\n\n💡 **Tip:** ลองระบุวันที่เข้าพักด้วย เช่น 'หาโรงแรม Shinjuku คะแนน 9+ วันที่ 15-17 พ.ค.' เพื่อให้ระบบดึงราคาถูกที่สุดมาให้ครับ"
         
         # Format the answer
         result_lines = []
