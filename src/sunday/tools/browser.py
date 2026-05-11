@@ -919,10 +919,11 @@ class BrowserTypeTool(BaseTool):
                 # --- FIX: Escape special CSS chars (e.g. ':' in React IDs like #:R55amr5:)
                 import re as _re
                 safe_selector = selector
-                # If it's an ID selector with special chars, use attribute selector instead
-                if selector.startswith('#') and _re.search(r'[:\[\]()]', selector[1:]):
-                    raw_id = selector[1:]
-                    safe_selector = f'[id="{raw_id}"]'
+                if _re.search(r'#[^\s]*[:.]', selector):
+                    id_match = _re.match(r'#(.+)', selector)
+                    if id_match:
+                        raw_id = id_match.group(1)
+                        safe_selector = f'[id="{raw_id}"]'
                 loc = page.locator(safe_selector).first
 
             # Ensure element is ready
