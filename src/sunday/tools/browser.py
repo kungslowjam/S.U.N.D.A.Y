@@ -1212,7 +1212,7 @@ class BrowserExtractTool(BaseTool):
                 has_listings = bool(_re.search(r'properties found', content) or _re.search(r'Opens in new window', content))
                 
                 if has_ratings or has_prices or has_listings:
-                    content += "\n\n>>> DATA RETRIEVED SUCCESSFULLY. You have hotel/listing data above. Parse it, filter by the user's criteria (e.g. 9+ rating), sort as requested, then present your answer. Do NOT call any more browser tools. <<<""
+                    content += "\n\n>>> DATA RETRIEVED SUCCESSFULLY. You have hotel/listing data above. Parse it, filter by the user's criteria (e.g. 9+ rating), sort as requested, then present your answer. Do NOT call any more browser tools. <<<"
                 
                 # Dedup guard
                 import hashlib

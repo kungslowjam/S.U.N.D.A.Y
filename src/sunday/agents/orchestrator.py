@@ -142,6 +142,15 @@ class OrchestratorAgent(ToolUsingAgent):
                     name=parsed["tool"],
                     arguments=parsed["input"] or "{}",
                 )
+
+                # === INTERCEPT: If model tries to scroll/click on a results page, force extract instead ===
+                if tool_call.name in ("browser_scroll", "browser_click") and turns > 5:
+                    # Check if we should have extracted already
+                    last_msg = messages[-1].content if messages else ""
+                    if "properties found" in last_msg.lower() or "Search results" in last_msg:
+                         tool_call.name = "browser_extract"
+                         tool_call.arguments = '{"selector": "body", "extract_type": "text"}'
+
                 tool_result = self._executor.execute(tool_call)
                 all_tool_results.append(tool_result)
 
@@ -468,120 +477,122 @@ class OrchestratorAgent(ToolUsingAgent):
         # Parse hotel/listing entries from the cleaned text
         import re as _re
         
-        # Find all entries with "Scored X.X" pattern
         entries = []
+        # Look for patterns like:
+        # Hotel Name
+        # ...
+        # Scored 9.1
+        # 9.1
+        # Superb
+        # 3,290 reviews
+        
+        # Split by blocks that look like entries (usually start with a name and end with reviews)
+        # We'll use a more flexible state machine
         lines = data_text.split('\n')
         current_entry = {}
         
         for i, line in enumerate(lines):
             line = line.strip()
-            if not line:
-                continue
+            if not line or len(line) < 2: continue
             
-            # Detect hotel name (line before "Opens in new window" or location line)
-            if 'Opens in new window' in line and current_entry.get('name'):
-                continue
-            
-            score_match = _re.match(r'^Scored (\d+\.\d+)$', line)
-            if score_match:
+            # 1. Detect Score/Rating (The most reliable anchor)
+            score_match = _re.search(r'(?:Scored\s+)?(\d\.\d)', line)
+            if score_match and 'score' not in current_entry:
                 current_entry['score'] = float(score_match.group(1))
+                # If we have a score but no name, look back 1-3 lines for the name
+                if not current_entry.get('name'):
+                    for j in range(1, 5):
+                        if i - j >= 0:
+                            prev_line = lines[i-j].strip()
+                            if len(prev_line) > 5 and 'window' not in prev_line and 'map' not in prev_line and 'access' not in prev_line:
+                                current_entry['name'] = prev_line
+                                break
                 continue
-            
-            rating_match = _re.match(r'^(\d+\.\d+)$', line)
-            if rating_match and 'score' not in current_entry:
-                current_entry['score'] = float(rating_match.group(1))
-                continue
-            
-            if line in ('Superb', 'Exceptional', 'Fabulous', 'Very good', 'Good', 'Pleasant'):
-                current_entry['rating_label'] = line
-                continue
-            
-            reviews_match = _re.match(r'^([\d,]+) reviews$', line)
-            if reviews_match:
-                current_entry['reviews'] = reviews_match.group(1)
-                # Entry is complete
+
+            # 2. Detect Reviews (The end of an entry)
+            if 'reviews' in line.lower() and _re.search(r'[\d,]+', line):
+                current_entry['reviews'] = _re.search(r'[\d,]+', line).group()
                 if current_entry.get('name') and current_entry.get('score'):
                     entries.append(dict(current_entry))
                 current_entry = {}
                 continue
-            
-            price_match = _re.search(r'(?:AUD|USD|JPY|EUR|¥|฿)\s*([\d,.]+)', line)
+
+            # 3. Detect Price
+            price_match = _re.search(r'(?:AUD|USD|JPY|EUR|¥|฿|THB|Price)\s*([\d,.]+)', line)
             if price_match:
                 current_entry['price'] = line
                 continue
-            
-            # Check if this looks like a hotel name (has substance, not a category)
-            if (len(line) > 5 and 
-                not line.startswith('Show') and 
-                not line.startswith('Select') and
-                not line.startswith('Sort') and
-                not line.startswith('Browse') and
-                'Ward, Tokyo' not in line and
-                'Metro access' not in line and
-                'on map' not in line and
-                not _re.match(r'^Location \d', line) and
-                not _re.match(r'^Value for', line) and
-                'properties found' not in line and
-                'Shinjuku Area' not in line and
-                line not in ('Bar', 'Free WiFi', '24-hour front desk', 'Restaurant', 'Non-smoking rooms')):
-                # Start a new entry
-                if current_entry.get('name') and current_entry.get('score'):
-                    entries.append(dict(current_entry))
-                current_entry = {'name': line}
-        
-        # Don't forget last entry
-        if current_entry.get('name') and current_entry.get('score'):
-            entries.append(dict(current_entry))
-        
+
+        # Fallback: If no entries found with reviews anchor, try a simpler name-score match
         if not entries:
-            return None  # No structured data found, let the model continue
+            for i, line in enumerate(lines):
+                score_match = _re.search(r'(?:Scored\s+)?([98]\.\d)', line)
+                if score_match:
+                    score = float(score_match.group(1))
+                    # Look for name in previous lines
+                    name = ""
+                    for j in range(1, 4):
+                        if i-j >= 0:
+                            prev = lines[i-j].strip()
+                            if len(prev) > 5 and 'window' not in prev and 'map' not in prev:
+                                name = prev
+                                break
+                    if name:
+                        entries.append({'name': name, 'score': score})
+
+        if not entries:
+            return None 
         
-        # Filter by user criteria if mentioned
+        # Deduplicate entries by name
+        seen_names = set()
+        unique_entries = []
+        for e in entries:
+            if e['name'] not in seen_names:
+                unique_entries.append(e)
+                seen_names.add(e['name'])
+        entries = unique_entries
+
+        # Filter by user criteria
         user_lower = user_input.lower()
-        filtered = entries
-        
-        # Check for rating filter (e.g., "9+", "คะแนน 9")
-        rating_filter = _re.search(r'(\d+)\+|คะแนน\s*(\d+)', user_lower)
+        min_score = 0
+        rating_filter = _re.search(r'(\d+(?:\.\d+)?)\+|คะแนน\s*(\d+(?:\.\d+)?)', user_lower)
         if rating_filter:
             min_score = float(rating_filter.group(1) or rating_filter.group(2))
-            filtered = [e for e in entries if e.get('score', 0) >= min_score]
         
-        # Check for top N (e.g., "3 อันดับ", "top 3")
-        top_n_match = _re.search(r'(\d+)\s*(?:อันดับ|อัน|top|ที่สุด)', user_lower)
-        top_n = int(top_n_match.group(1)) if top_n_match else 5
+        filtered = [e for e in entries if e.get('score', 0) >= min_score]
         
-        # Sort by price if available, otherwise by score descending
-        if any(e.get('price') for e in filtered):
-            filtered.sort(key=lambda e: float(_re.search(r'[\d,.]+', e.get('price', '999999')).group().replace(',', '')) if e.get('price') else 999999)
+        # Sort
+        # If "cheapest" or "ถูกที่สุด" is mentioned, and we have prices
+        if ("cheap" in user_lower or "ถูก" in user_lower) and any(e.get('price') for e in filtered):
+            def sort_price(e):
+                p = e.get('price', '999,999')
+                m = _re.search(r'[\d,]+', p)
+                return float(m.group().replace(',', '')) if m else 999999
+            filtered.sort(key=sort_price)
         else:
             filtered.sort(key=lambda e: e.get('score', 0), reverse=True)
+        
+        # Limit
+        top_n = 3
+        top_n_match = _re.search(r'(\d+)\s*(?:อันดับ|อัน|top|ที่สุด)', user_lower)
+        if top_n_match: top_n = int(top_n_match.group(1))
         
         display = filtered[:top_n]
         
         if not display:
-            return f"ไม่พบโรงแรมที่ตรงตามเงื่อนไข (คะแนน {min_score}+) ในหน้านี้ จากทั้งหมด {len(entries)} โรงแรมที่พบ"
+            return f"พบโรงแรม {len(entries)} แห่งในหน้านี้ แต่อันที่คะแนนสูงกว่า {min_score} ยังไม่แสดงราคาหรือข้อมูลไม่ครบ โปรดระบุวันที่เข้าพักเพื่อให้ระบบดึงราคามาเปรียบเทียบได้แม่นยำขึ้นครับ"
         
         # Format the answer
         result_lines = []
         for i, e in enumerate(display, 1):
-            name = e.get('name', 'Unknown')
+            name = e.get('name', 'ไม่ระบุชื่อ')
             score = e.get('score', 'N/A')
-            label = e.get('rating_label', '')
-            reviews = e.get('reviews', '')
-            price = e.get('price', 'ดูราคาที่ Booking.com')
-            
-            result_lines.append(
-                f"**{i}. {name}**\n"
-                f"   ⭐ คะแนน: {score}/10 ({label})\n"
-                f"   📝 รีวิว: {reviews}\n"
-                f"   💰 ราคา: {price}"
-            )
+            price = e.get('price', 'ไม่ระบุราคา (โปรดเลือกวันที่)')
+            rev = e.get('reviews', 'N/A')
+            result_lines.append(f"**{i}. {name}**\n   ⭐ คะแนน: {score}/10 | 📝 รีวิว: {rev}\n   💰 ราคา: {price}")
         
-        header = f"🏨 โรงแรมใน Shinjuku ที่ตรงตามเงื่อนไข ({len(display)} จาก {len(entries)} ที่พบ):\n\n"
-        answer = header + "\n\n".join(result_lines)
-        answer += "\n\n📌 *ข้อมูลจาก Booking.com (ราคาอาจเปลี่ยนแปลงตามวันที่เข้าพัก)*"
-        
-        return answer
+        header = f"🏨 ผลการค้นหาโรงแรมย่าน Shinjuku (คะแนน {min_score}+):\n\n"
+        return header + "\n\n".join(result_lines) + "\n\n📌 *หมายเหตุ: ข้อมูลนี้เป็นราคาเริ่มต้นหรือราคาประเมิน โปรดเช็คราคาจริงโดยระบุวันที่เข้าพักอีกครั้งครับ*"
 
 
 __all__ = ["OrchestratorAgent"]
