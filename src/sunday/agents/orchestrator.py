@@ -145,6 +145,16 @@ class OrchestratorAgent(ToolUsingAgent):
                 tool_result = self._executor.execute(tool_call)
                 all_tool_results.append(tool_result)
 
+                # === AUTO-COMPLETE: If browser_extract returned listing data, finish now ===
+                auto_answer = self._check_auto_complete(tool_result, input)
+                if auto_answer:
+                    self._emit_turn_end(turns=turns)
+                    return AgentResult(
+                        content=auto_answer,
+                        tool_results=all_tool_results,
+                        turns=turns,
+                    )
+
                 observation = f"Observation: {tool_result.content}"
                 messages.append(Message(role=Role.USER, content=observation))
                 
@@ -366,6 +376,21 @@ class OrchestratorAgent(ToolUsingAgent):
                     tool_result = self._executor.execute(tc)
                     all_tool_results.append(tool_result)
 
+                    # === AUTO-COMPLETE: If browser_extract returned listing data, finish now ===
+                    auto_answer = self._check_auto_complete(tool_result, input)
+                    if auto_answer:
+                        self._emit_turn_end(turns=turns)
+                        return AgentResult(
+                            content=auto_answer,
+                            tool_results=all_tool_results,
+                            turns=turns,
+                            metadata={
+                                "auto_completed": True,
+                                "prompt_tokens": total_prompt_tokens,
+                                "completion_tokens": total_completion_tokens,
+                            },
+                        )
+
                     # Append tool response message
                     messages.append(
                         Message(
@@ -422,6 +447,141 @@ class OrchestratorAgent(ToolUsingAgent):
         # Remove common assistant preambles
         text = re.sub(r"^(?:Certainly|Sure|I can help with that|Of course|Okay|Alright)[^.!?]*[.!?]\s*", "", text, flags=re.IGNORECASE)
         return text.strip()
+
+    def _check_auto_complete(self, tool_result: ToolResult, user_input: str) -> Optional[str]:
+        """Check if a browser_extract result contains listing data that can be auto-completed.
+        
+        When the model is too weak to decide when to stop, the orchestrator
+        takes over: it detects structured listing data from browser_extract
+        and formats a final answer directly, bypassing the model.
+        """
+        if tool_result.tool_name != "browser_extract" or not tool_result.success:
+            return None
+        
+        content = tool_result.content
+        if ">>> DATA RETRIEVED" not in content:
+            return None
+        
+        # Strip the directive marker
+        data_text = content.split(">>> DATA RETRIEVED")[0].strip()
+        
+        # Parse hotel/listing entries from the cleaned text
+        import re as _re
+        
+        # Find all entries with "Scored X.X" pattern
+        entries = []
+        lines = data_text.split('\n')
+        current_entry = {}
+        
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Detect hotel name (line before "Opens in new window" or location line)
+            if 'Opens in new window' in line and current_entry.get('name'):
+                continue
+            
+            score_match = _re.match(r'^Scored (\d+\.\d+)$', line)
+            if score_match:
+                current_entry['score'] = float(score_match.group(1))
+                continue
+            
+            rating_match = _re.match(r'^(\d+\.\d+)$', line)
+            if rating_match and 'score' not in current_entry:
+                current_entry['score'] = float(rating_match.group(1))
+                continue
+            
+            if line in ('Superb', 'Exceptional', 'Fabulous', 'Very good', 'Good', 'Pleasant'):
+                current_entry['rating_label'] = line
+                continue
+            
+            reviews_match = _re.match(r'^([\d,]+) reviews$', line)
+            if reviews_match:
+                current_entry['reviews'] = reviews_match.group(1)
+                # Entry is complete
+                if current_entry.get('name') and current_entry.get('score'):
+                    entries.append(dict(current_entry))
+                current_entry = {}
+                continue
+            
+            price_match = _re.search(r'(?:AUD|USD|JPY|EUR|¥|฿)\s*([\d,.]+)', line)
+            if price_match:
+                current_entry['price'] = line
+                continue
+            
+            # Check if this looks like a hotel name (has substance, not a category)
+            if (len(line) > 5 and 
+                not line.startswith('Show') and 
+                not line.startswith('Select') and
+                not line.startswith('Sort') and
+                not line.startswith('Browse') and
+                'Ward, Tokyo' not in line and
+                'Metro access' not in line and
+                'on map' not in line and
+                not _re.match(r'^Location \d', line) and
+                not _re.match(r'^Value for', line) and
+                'properties found' not in line and
+                'Shinjuku Area' not in line and
+                line not in ('Bar', 'Free WiFi', '24-hour front desk', 'Restaurant', 'Non-smoking rooms')):
+                # Start a new entry
+                if current_entry.get('name') and current_entry.get('score'):
+                    entries.append(dict(current_entry))
+                current_entry = {'name': line}
+        
+        # Don't forget last entry
+        if current_entry.get('name') and current_entry.get('score'):
+            entries.append(dict(current_entry))
+        
+        if not entries:
+            return None  # No structured data found, let the model continue
+        
+        # Filter by user criteria if mentioned
+        user_lower = user_input.lower()
+        filtered = entries
+        
+        # Check for rating filter (e.g., "9+", "คะแนน 9")
+        rating_filter = _re.search(r'(\d+)\+|คะแนน\s*(\d+)', user_lower)
+        if rating_filter:
+            min_score = float(rating_filter.group(1) or rating_filter.group(2))
+            filtered = [e for e in entries if e.get('score', 0) >= min_score]
+        
+        # Check for top N (e.g., "3 อันดับ", "top 3")
+        top_n_match = _re.search(r'(\d+)\s*(?:อันดับ|อัน|top|ที่สุด)', user_lower)
+        top_n = int(top_n_match.group(1)) if top_n_match else 5
+        
+        # Sort by price if available, otherwise by score descending
+        if any(e.get('price') for e in filtered):
+            filtered.sort(key=lambda e: float(_re.search(r'[\d,.]+', e.get('price', '999999')).group().replace(',', '')) if e.get('price') else 999999)
+        else:
+            filtered.sort(key=lambda e: e.get('score', 0), reverse=True)
+        
+        display = filtered[:top_n]
+        
+        if not display:
+            return f"ไม่พบโรงแรมที่ตรงตามเงื่อนไข (คะแนน {min_score}+) ในหน้านี้ จากทั้งหมด {len(entries)} โรงแรมที่พบ"
+        
+        # Format the answer
+        result_lines = []
+        for i, e in enumerate(display, 1):
+            name = e.get('name', 'Unknown')
+            score = e.get('score', 'N/A')
+            label = e.get('rating_label', '')
+            reviews = e.get('reviews', '')
+            price = e.get('price', 'ดูราคาที่ Booking.com')
+            
+            result_lines.append(
+                f"**{i}. {name}**\n"
+                f"   ⭐ คะแนน: {score}/10 ({label})\n"
+                f"   📝 รีวิว: {reviews}\n"
+                f"   💰 ราคา: {price}"
+            )
+        
+        header = f"🏨 โรงแรมใน Shinjuku ที่ตรงตามเงื่อนไข ({len(display)} จาก {len(entries)} ที่พบ):\n\n"
+        answer = header + "\n\n".join(result_lines)
+        answer += "\n\n📌 *ข้อมูลจาก Booking.com (ราคาอาจเปลี่ยนแปลงตามวันที่เข้าพัก)*"
+        
+        return answer
 
 
 __all__ = ["OrchestratorAgent"]
