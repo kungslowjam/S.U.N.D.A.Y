@@ -102,29 +102,35 @@ class OrchestratorAgent(ToolUsingAgent):
         """
         provider = self._config.intelligence.provider
         
+        # Determine the correct brain
         if provider == "hybrid":
-            # Rule: Use Cloud for research, Local for summary
             last_msg_content = messages[-1].content if messages else ""
-            
-            # If we just extracted data, or have been chatting a lot, use Local to summarize
-            if ">>> DATA RETRIEVED" in last_msg_content or len(messages) > 10:
+            # If we have data OR it's a simple final summary -> Local
+            if ">>> DATA RETRIEVED" in last_msg_content or "Summary of search" in last_msg_content:
                 current_provider = "local"
                 model = self._config.intelligence.fallback_model
+                brain_tag = f"[💻 LOCAL: {model}]"
             else:
                 current_provider = "openrouter"
                 model = self._config.intelligence.default_model
+                brain_tag = f"[🧠 CLOUD: {model}]"
         else:
             current_provider = provider
-            model = self._model # Use the model assigned to this agent
+            model = self._model
+            brain_tag = f"[{provider.upper()}: {model}]"
 
-        return self._engine.generate(
+        res = self._engine.generate(
             messages,
             model=model,
             temperature=self._temperature,
             max_tokens=self._max_tokens,
-            # We add a hint for the engine to know which provider to route to
-            provider=current_provider 
+            provider=current_provider
         )
+        
+        if "content" in res and res["content"] and not res["content"].startswith("["):
+            res["content"] = f"{brain_tag} {res['content']}"
+            
+        return res
 
     # ------------------------------------------------------------------
     # Structured mode (THOUGHT/TOOL/INPUT/FINAL_ANSWER)
@@ -148,15 +154,26 @@ class OrchestratorAgent(ToolUsingAgent):
 
             sys_prompt = build_system_prompt(tools=self._tools)
 
+        # === SMART HARNESS: Pre-calculate optimized URLs and FORCE first step ===
+        smart_url = self._generate_smart_url(input)
+        
         messages = self._build_messages(input, context, system_prompt=sys_prompt)
-
-        # === SMART HARNESS: Pre-calculate optimized URLs for known domains ===
-        smart_hint = self._generate_smart_url(input)
-        if smart_hint:
-            messages.append(Message(role=Role.USER, content=f"HINT: To be faster, use this direct URL immediately: {smart_hint}"))
-
         all_tool_results: list[ToolResult] = []
         turns = 0
+
+        # If we have a smart URL, we inject a FORCED first tool result as if the model called it
+        if smart_url:
+            turns += 1
+            from sunday.core.types import ToolResult
+            # We don't just hint, we DO it. We navigate immediately.
+            from sunday.tools.browser import BrowserNavigateTool
+            nav_tool = BrowserNavigateTool()
+            tool_result = nav_tool.execute(url=smart_url, wait_for="load")
+            all_tool_results.append(tool_result)
+            
+            messages.append(Message(role=Role.ASSISTANT, content=f"I will navigate directly to the optimized search results to save time: {smart_url}"))
+            messages.append(Message(role=Role.USER, content=f"Observation: {tool_result.content}"))
+            # Now the model starts from TURN 2 already at the results page!
 
         for _turn in range(self._max_turns):
             turns += 1
@@ -296,13 +313,26 @@ class OrchestratorAgent(ToolUsingAgent):
     ) -> AgentResult:
         self._emit_turn_start(input)
 
-        # Build initial messages
+        # === SMART HARNESS: Pre-calculate optimized URLs and FORCE first step ===
+        smart_url = self._generate_smart_url(input)
+        
         messages = self._build_messages(input, context)
+        all_tool_results: list[ToolResult] = []
+        turns = 0
 
-        # === SMART HARNESS: Pre-calculate optimized URLs for known domains ===
-        smart_hint = self._generate_smart_url(input)
-        if smart_hint:
-            messages.append(Message(role=Role.USER, content=f"HINT: To be faster, use this direct URL immediately: {smart_hint}"))
+        # If we have a smart URL, we inject a FORCED first tool result immediately
+        if smart_url:
+            turns += 1
+            from sunday.tools.browser import BrowserNavigateTool
+            nav_tool = BrowserNavigateTool()
+            tool_result = nav_tool.execute(url=smart_url, wait_for="load")
+            all_tool_results.append(tool_result)
+            
+            # Record the navigation as if the model did it
+            messages.append(Message(role=Role.ASSISTANT, content=None, tool_calls=[
+                ToolCall(id="orch_init", name="browser_navigate", arguments=f'{{"url": "{smart_url}"}}')
+            ]))
+            messages.append(Message(role=Role.TOOL, content=tool_result.content, tool_call_id="orch_init"))
 
         # Get OpenAI-format tool definitions
         openai_tools = self._executor.get_openai_tools() if self._tools else []
