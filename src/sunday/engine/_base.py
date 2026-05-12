@@ -17,7 +17,22 @@ def messages_to_dicts(messages: Sequence[Message]) -> List[Dict[str, Any]]:
     """Convert ``Message`` objects to OpenAI-format dicts."""
     out: List[Dict[str, Any]] = []
     for m in messages:
-        d: Dict[str, Any] = {"role": m.role.value, "content": m.content}
+        d: Dict[str, Any] = {"role": m.role.value}
+        
+        # Handle Multi-modal content
+        if m.images:
+            # Cloud engines (OpenAI, Gemini, Anthropic) usually expect list of blocks
+            content_blocks = [{"type": "text", "text": m.content}]
+            for img in m.images:
+                # If it's already a data URL, use it, otherwise wrap it
+                url = img if img.startswith("data:") else f"data:image/png;base64,{img}"
+                content_blocks.append({"type": "image_url", "image_url": {"url": url}})
+            d["content"] = content_blocks
+            # Ollama also likes a top-level images list
+            d["images"] = m.images
+        else:
+            d["content"] = m.content
+
         if m.name:
             d["name"] = m.name
         if m.tool_calls:

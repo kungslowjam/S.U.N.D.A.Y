@@ -269,16 +269,15 @@ class OperativeAgent(ToolUsingAgent):
         try:
             session = self._session_store.get_or_create(session_id)
             if hasattr(session, "messages") and session.messages:
-                # Return last 10 messages to avoid context overflow
-                recent = session.messages[-10:]
-                return [
+                msgs = [
                     Message(
                         role=Role(m.get("role", "user")),
                         content=m.get("content", ""),
                     )
-                    for m in recent
+                    for m in session.messages
                     if isinstance(m, dict)
                 ]
+                return self._context_manager.apply_window(msgs, max_messages=10)
         except Exception:
             logger.debug("Could not load session for operator %s", self._operator_id)
         return []

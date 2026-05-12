@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from sunday.core.events import EventBus, EventType
+from sunday.core.context import ContextManager
 
 
 @dataclass(slots=True)
@@ -53,6 +54,10 @@ class LoopGuard:
         self._per_tool_counts: dict[str, int] = {}
         # Track cycle keys that have already been warned (for warn-before-block)
         self._warned_cycles: set[str] = set()
+        
+        self._context_manager = ContextManager(
+            max_messages=config.max_context_messages
+        )
 
         try:
             from sunday._rust_bridge import get_rust_module
@@ -146,68 +151,11 @@ class LoopGuard:
         return getattr(msg, "role", None) == "tool"
 
     def compress_context(self, messages: list) -> list:
-        """Apply 4-stage context overflow recovery to message list.
-
-        Stages:
-        1. Summarize old tool results (replace content with "[Tool result truncated]")
-        2. Sliding window — keep only recent messages
-        3. Drop tool call/result pairs from the middle
-        4. Truncate to system + last 2 exchanges
-        """
-        if len(messages) <= self._config.max_context_messages:
-            return messages
-
-        # Stage 1: Truncate old tool result messages
-        threshold = len(messages) // 2
-        compressed = []
-        for i, msg in enumerate(messages):
-            if i < threshold and self._is_tool(msg):
-                from sunday.core.types import Message, Role
-
-                compressed.append(
-                    Message(
-                        role=Role.TOOL,
-                        content="[Tool result truncated]",
-                        tool_call_id=getattr(
-                            msg,
-                            "tool_call_id",
-                            None,
-                        ),
-                        name=getattr(msg, "name", None),
-                    )
-                )
-            else:
-                compressed.append(msg)
-
-        if len(compressed) <= self._config.max_context_messages:
-            return compressed
-
-        # Stage 2: Sliding window — keep system + recent
-        system_msgs = [m for m in compressed if self._is_system(m)]
-        non_system = [m for m in compressed if not self._is_system(m)]
-        window_size = self._config.max_context_messages - len(system_msgs)
-        if len(non_system) > window_size:
-            non_system = non_system[-window_size:]
-        compressed = system_msgs + non_system
-
-        if len(compressed) <= self._config.max_context_messages:
-            return compressed
-
-        # Stage 3: Drop tool call/result pairs from middle
-        keep_start = max(
-            len(system_msgs),
-            len(compressed) // 10,
+        """Apply context optimization via the centralized ContextManager."""
+        return self._context_manager.optimize(
+            messages, 
+            max_messages=self._config.max_context_messages
         )
-        keep_end = len(compressed) // 2
-        compressed = compressed[:keep_start] + compressed[-keep_end:]
-
-        if len(compressed) <= self._config.max_context_messages:
-            return compressed
-
-        # Stage 4: Extreme — system + last 2 exchanges
-        sys_final = [m for m in compressed if self._is_system(m)]
-        tail = [m for m in compressed if not self._is_system(m)]
-        return sys_final + tail[-4:]
 
     def reset(self) -> None:
         """Reset all tracking state — always via Rust backend."""

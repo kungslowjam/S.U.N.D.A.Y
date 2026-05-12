@@ -288,49 +288,44 @@ class _BrowserSession:
 
         window.__get_ax_tree = () => {
             window.__show_scanner(); 
-            const interactiveRoles = ['button', 'link', 'checkbox', 'menuitem', 'option', 'tab', 'textbox', 'combobox'];
+            const interactiveRoles = ['button', 'link', 'checkbox', 'menuitem', 'option', 'tab', 'textbox', 'combobox', 'searchbox'];
             const tree = [];
             let idCounter = 1;
             
             const processNode = (node) => {
                 if (!node || !node.querySelectorAll) return;
-                const elements = node.querySelectorAll('button, a, input, select, textarea, [role], [onclick], span, div');
+                // Focus only on likely interactive elements to save tokens
+                const elements = node.querySelectorAll('button, a, input, select, textarea, [role], [onclick]');
                 elements.forEach(el => {
-                    // Avoid duplicates if already processed in this turn
                     if (el.hasAttribute('data-sunday-id')) return;
 
                     const rect = el.getBoundingClientRect();
                     const style = window.getComputedStyle(el);
                     
-                    if (rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden') {
+                    if (rect.width > 2 && rect.height > 2 && style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
                         const role = el.getAttribute('role') || el.tagName.toLowerCase();
                         const text = (el.innerText || el.value || el.placeholder || el.getAttribute('aria-label') || '').trim();
                         
                         const isClickable = style.cursor === 'pointer' || el.onclick || el.hasAttribute('onclick') || interactiveRoles.includes(role);
                         
-                        // Logic to include meaningful elements
                         if (text.length > 0 || isClickable) {
-                            // Filter out giant layout containers unless they are interactive
-                            if (rect.width < 1000 || isClickable || ['a', 'button', 'input'].includes(role)) {
-                                const id = idCounter++;
-                                el.setAttribute('data-sunday-id', id);
-                                tree.push({
-                                    id,
-                                    role,
-                                    text: text.substring(0, 100).replace(/\n/g, ' '),
-                                    x: Math.round(rect.left + rect.width / 2),
-                                    y: Math.round(rect.top + rect.height / 2)
-                                });
-                            }
+                            const id = idCounter++;
+                            el.setAttribute('data-sunday-id', id);
+                            tree.push({
+                                id,
+                                role,
+                                text: text.substring(0, 60).replace(/\n/g, ' '),
+                                x: Math.round(rect.left + rect.width / 2),
+                                y: Math.round(rect.top + rect.height / 2)
+                            });
                         }
                     }
-                    // Deep crawl into shadow roots
                     if (el.shadowRoot) processNode(el.shadowRoot);
                 });
             };
             
             processNode(document);
-            return tree;
+            return tree.slice(0, 80); // Cap at 80 elements to prevent token flooding
         };
 
         window.__move_cursor = (x, y, statusText = '') => {

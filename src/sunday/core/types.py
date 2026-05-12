@@ -67,6 +67,7 @@ class Message:
     name: Optional[str] = None
     tool_calls: Optional[List[ToolCall]] = None
     tool_call_id: Optional[str] = None
+    images: Optional[List[str]] = None  # Base64 or URLs for multi-modal support
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -192,6 +193,8 @@ def _message_to_dict(msg: "Message") -> Dict[str, Any]:
         ]
     if msg.tool_call_id:
         d["tool_call_id"] = msg.tool_call_id
+    if msg.images:
+        d["images"] = msg.images
     return d
 
 

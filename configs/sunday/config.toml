@@ -3,19 +3,18 @@
 # ═══════════════════════════════════════════════════════════════
 
 [intelligence]
-default_model = "anthropic/claude-3.5-sonnet"
+default_model = "openrouter/google/gemini-2.5-flash:free"
 # Alternative Cloud Models (via OpenRouter):
-# default_model = "anthropic/claude-3.5-sonnet"
-# default_model = "meta-llama/llama-3.1-405b-instruct"
-# default_model = "google/gemini-pro-1.5"
-fallback_model = "gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
+# default_model = "openrouter/openai/gpt-oss-120b:free"  # ❌ No function calling
+# default_model = "openrouter/google/gemma-4-31b-it:free"
+fallback_model = "Qwen3.5-9B-DeepSeek-V4-Flash-Q4_K_S.gguf"
 preferred_engine = "llamacpp"
-provider = "hybrid" # options: local, openrouter, hybrid, openai, anthropic, google
+provider = "local" # options: local, openrouter, hybrid, openai, anthropic, google
 
 [intelligence.openrouter]
 api_key = "" # SET THIS IN YOUR ENVIRONMENT: $env:OPENROUTER_API_KEY="..."
 base_url = "https://openrouter.ai/api/v1"
-model = "anthropic/claude-3.5-sonnet"
+model = "google/gemini-2.5-flash:free"
 
 # Generation defaults
 temperature = 0.1
@@ -29,21 +28,21 @@ repetition_penalty = 1.2
 # ═══════════════════════════════════════════════════════════════
 [agent]
 default_agent = "orchestrator"
-mode = "structured"
+mode = "function_calling"
 max_turns = 15
 max_tokens = 4096
-tools = "code_interpreter,openalex_search,web_search,file_read,file_write,shell,skills,browser_navigate,browser_click,browser_type,browser_screenshot,browser_extract,browser_get_elements,browser_drag,browser_scroll,browser_get_accessibility_tree,browser_reset,browser_use_task,git,calculator,think"
-objective = """You are SUNDAY, an autonomous AI assistant. Follow these rules strictly:
-1. EFFICIENCY: For browser tasks, navigate to the target page, extract data ONCE with browser_extract, then immediately summarize and respond. Do NOT call browser_extract or browser_get_elements on the same page more than once.
-2. WHEN YOU HAVE DATA, STOP: If browser_extract returns hotel names, prices, or any requested data, your job is to parse that text, summarize it, and present it to the user. Do NOT continue browsing.
-3. URL FIRST: Try constructing a direct URL with filters before filling forms manually.
-   - Booking.com: https://www.booking.com/searchresults.html?ss=City&checkin=YYYY-MM-DD&checkout=YYYY-MM-DD&nflt=class%3D5 (for 5 stars)
-   - Amazon: https://www.amazon.co.jp/s?k=Query
-   - Google: https://www.google.com/search?q=Query
-4. FALLBACK: If browser_use_task fails, use browser_navigate + browser_extract as a 2-step fallback. If that also fails, use web_search.
-5. HONESTY: Only report data you actually extracted. Never fabricate results.
-6. CLARIFY: If critical information is missing (e.g., specific dates for hotel booking, precise location), ask the user for clarification instead of guessing or aimless browsing.
-7. NO WANDERING: If a site seems too complex or has too many popups, immediately try constructing a direct search URL (see Rule 3)."""
+tools = "code_interpreter,openalex_search,web_search,file_read,file_write,shell_exec,skill_manage,delegate_browser,delegate_research,browser_navigate,browser_click,browser_type,browser_screenshot,browser_extract,browser_get_elements,browser_drag,browser_scroll,browser_get_accessibility_tree,browser_reset,browser_use_task,git,calculator,think"
+objective = """1. AUTONOMOUS FIRST: You are a proactive assistant. Never tell the user how to do something manually if you have a tool to do it yourself. Always use the browser or web search to find real-time data instead of relying on your training data or general knowledge.
+2. VISUAL VERIFICATION: After any critical data extraction or navigation, use browser_screenshot. If you have vision capabilities, analyze the image to verify that the extracted text matches what is visually displayed. This prevents hallucinations.
+3. EFFICIENCY: For browser tasks, navigate to the target page, extract data ONCE with browser_extract, then immediately summarize and respond. Do NOT call browser_extract or browser_get_elements on the same page more than once.
+4. WHEN YOU HAVE DATA, STOP: If browser_extract returns hotel names, prices, or any requested data, your job is to parse that text, summarize it, and present it to the user. Do NOT continue browsing.
+5. URL FIRST: Before interacting with a site's homepage or filling forms, use your knowledge to construct a direct search URL (with filters) to jump straight to the results. If you don't know the URL structure, you may use a search engine to find it first.
+6. EXECUTION PLAN: In your THOUGHT, always maintain a list of tasks using [ ] for upcoming and [x] for completed steps. This provides a visual timeline for the user.
+7. SEMANTIC BROWSING: Prioritize using browser_get_accessibility_tree or browser_get_elements. These tools provide a "Semantic Layer" (Roles, Labels) which is much more robust than raw HTML. Focus on finding elements by their semantic meaning (e.g., "Submit button", "Check-in date input").
+8. FALLBACK: If browser_use_task fails, use the semantic tools as a fallback. If that also fails, use web_search.
+9. HONESTY: Only report data you actually extracted. Never fabricate results.
+10. CLARIFY: If critical information is missing (e.g., specific dates for hotel booking, precise location), ask the user for clarification instead of guessing or aimless browsing.
+11. NO WANDERING: If a site seems too complex or has too many popups, immediately try constructing a direct search URL (see Rule 3)."""
 context_from_memory = true
 
 # ═══════════════════════════════════════════════════════════════

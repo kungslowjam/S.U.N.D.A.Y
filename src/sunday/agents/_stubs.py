@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from sunday.core.config import load_config
 from sunday.core.events import EventBus, EventType
 from sunday.core.types import Conversation, Message, Role, ToolResult
+from sunday.core.context import ContextManager
 from sunday.engine._stubs import InferenceEngine
 
 
@@ -353,6 +354,15 @@ class ToolUsingAgent(BaseAgent):
                 self._loop_guard = LoopGuard(loop_guard_config, bus=bus)
         except ImportError:
             pass
+            
+        # Context Manager
+        try:
+            cfg = load_config()
+            max_msg = cfg.agent.max_messages if hasattr(cfg.agent, "max_messages") else 20
+        except Exception:
+            max_msg = 20
+            
+        self._context_manager = ContextManager(max_messages=max_msg)
 
 
 __all__ = ["AgentContext", "AgentResult", "BaseAgent", "ToolUsingAgent"]

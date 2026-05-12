@@ -148,6 +148,7 @@ def serve(
     except Exception as exc:
         logger.debug("Engine instrumentation failed: %s", exc)
 
+
     # Discover models
     all_engines = discover_engines(config)
     all_models = discover_models(all_engines)
@@ -164,6 +165,19 @@ def serve(
         else:
             console.print("[red]No model available on engine.[/red]")
             sys.exit(1)
+
+    # When provider is "local", override display model to show the actual
+    # local model instead of a cloud model name (e.g. openrouter/...).
+    if config.intelligence.provider == "local":
+        local_model = config.intelligence.fallback_model
+        if not local_model:
+            # Try to detect from llama-server
+            engine_models = all_models.get("llamacpp", [])
+            if engine_models:
+                local_model = engine_models[0]
+        if local_model:
+            model_name = local_model
+            console.print(f"  Provider: [cyan]local[/cyan] → using [cyan]{model_name}[/cyan]")
 
     # Resolve agent
     agent = None

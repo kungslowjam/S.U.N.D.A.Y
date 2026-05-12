@@ -171,7 +171,8 @@ $SundayExe = "$ProjectRoot\.venv\Scripts\sunday.exe"
 if (Test-Http "http://localhost:$BackendPort/v1/models" 2) {
     Write-Host "[SKIP] SUNDAY Backend is already running." -ForegroundColor Yellow
 } else {
-    Start-ServiceProcess -Command "`$env:OPENSUNDAY_CONFIG='$ConfigPath'; & '$SundayExe' serve --engine llamacpp --model '$ModelName' --host 127.0.0.1 --port $BackendPort" -WorkingDirectory $ProjectRoot
+    # 🧠 Use 'multi' engine for hybrid support and explicitly set agent to 'orchestrator'
+    Start-ServiceProcess -Command "`$env:OPENSUNDAY_CONFIG='$ConfigPath'; & '$SundayExe' serve --engine multi --agent orchestrator --host 127.0.0.1 --port $BackendPort" -WorkingDirectory $ProjectRoot
     Wait-ForHttp "http://localhost:$BackendPort/v1/models" 90
 }
 Write-Elapsed $StepStart
@@ -183,7 +184,8 @@ $StepStart = Get-Date
 if (Test-Http "http://localhost:$FrontendPort" 2) {
     Write-Host "[SKIP] Frontend Dashboard is already running." -ForegroundColor Yellow
 } else {
-    Start-ServiceProcess -Command "npm run dev" -WorkingDirectory "$ProjectRoot\frontend"
+    # 🧠 Run Frontend in Hidden mode by default to reduce clutter
+    Start-Process powershell -ArgumentList "-NoExit", "-Command", "npm run dev" -WorkingDirectory "$ProjectRoot\frontend" -WindowStyle Hidden
     Wait-ForHttp "http://localhost:$FrontendPort" 120
 }
 Write-Elapsed $StepStart
@@ -193,6 +195,8 @@ Write-Host "[OK] Frontend is ready." -ForegroundColor Green
 if ($StartVoiceLive) {
     Write-Host "[4/4] Starting Voice Live Overlay on port $VoiceLivePort..." -ForegroundColor Cyan
     $StepStart = Get-Date
+    # 🧠 Run Voice Live in Hidden mode
+    $env:SUNDAY_CONSOLE_STYLE = "Hidden"
     & "$ProjectRoot\voice-live\start_voice_live.ps1"
     Write-Elapsed $StepStart
     Write-Host "[OK] Voice Live is ready." -ForegroundColor Green
@@ -210,8 +214,8 @@ Write-Host "       ALL SYSTEMS ARE GO! 🚀" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host " AI Engine  : http://localhost:$LlamaPort"
 Write-Host " Backend API: http://localhost:$BackendPort"
-Write-Host " Dashboard  : http://localhost:$FrontendPort"
-if ($StartVoiceLive) {
-    Write-Host " Voice Live : http://localhost:$VoiceLivePort"
-}
+# Write-Host " Dashboard  : http://localhost:$FrontendPort"
+# if ($StartVoiceLive) {
+#     Write-Host " Voice Live : http://localhost:$VoiceLivePort"
+# }
 Write-Host "========================================"
