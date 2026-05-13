@@ -126,9 +126,24 @@ Write-Host " Model      : $ModelName" -ForegroundColor DarkGray
 Write-Host " Model path : $ModelPath" -ForegroundColor DarkGray
 Write-Host " Consoles   : $ConsoleWindowStyle (set SUNDAY_CONSOLE_STYLE=Normal to show logs)" -ForegroundColor DarkGray
 
+function Clear-Discord {
+    $PidFile = "$HOME\.sunday\discord-daemon.pid"
+    if (Test-Path $PidFile) {
+        $StoredPid = Get-Content $PidFile
+        if ($StoredPid) {
+            Write-Host "[CLEAN] Clearing Discord Daemon (PID $StoredPid)..." -ForegroundColor Yellow
+            try {
+                Stop-Process -Id $StoredPid -Force -ErrorAction SilentlyContinue
+                Remove-Item $PidFile -ErrorAction SilentlyContinue
+            } catch {}
+        }
+    }
+}
+
 Clear-Port $LlamaPort "AI Engine"
 Clear-Port $BackendPort "SUNDAY Backend"
 Clear-Port $FrontendPort "Frontend Dashboard"
+Clear-Discord
 if ($StartVoiceLive) {
     Clear-Port $VoiceLlamaPort "Voice LLM"
     Clear-Port $VoiceLivePort "Voice Live Overlay"
@@ -204,7 +219,31 @@ if ($StartVoiceLive) {
     Write-Host "[4/4] Voice Live disabled (SUNDAY_VOICE_LIVE=0)." -ForegroundColor Yellow
 }
 
-# 5. Open Browser
+# 5. Start Discord Daemon (optional)
+$DiscordToken = if ($env:DISCORD_BOT_TOKEN) { $env:DISCORD_BOT_TOKEN } else { 
+    # Try to extract from .env if present
+    if (Test-Path "$ProjectRoot\.env") {
+        $EnvFile = Get-Content "$ProjectRoot\.env"
+        $TokenLine = $EnvFile | Where-Object { $_ -match "^DISCORD_BOT_TOKEN=" }
+        if ($TokenLine) { $TokenLine.Split("=")[1].Trim() }
+    }
+}
+
+if ($DiscordToken) {
+    Write-Host "[5/5] Starting Discord Daemon..." -ForegroundColor Cyan
+    $StepStart = Get-Date
+    
+    $PythonExe = "$ProjectRoot\.venv\Scripts\python.exe"
+    # Use the same model as the main engine
+    Start-ServiceProcess -Command "`$env:PYTHONPATH='$ProjectRoot\src'; & '$PythonExe' -m sunday.channels.discord_daemon --bot-token '$DiscordToken' --model '$ModelName'" -WorkingDirectory $ProjectRoot
+    
+    Write-Elapsed $StepStart
+    Write-Host "[OK] Discord Daemon is starting." -ForegroundColor Green
+} else {
+    Write-Host "[5/5] Discord Daemon skipped (No DISCORD_BOT_TOKEN found)." -ForegroundColor Yellow
+}
+
+# 6. Open Browser
 Write-Host "Opening Dashboard..." -ForegroundColor Cyan
 Start-Process "http://localhost:$FrontendPort"
 
@@ -214,6 +253,9 @@ Write-Host "       ALL SYSTEMS ARE GO! 🚀" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host " AI Engine  : http://localhost:$LlamaPort"
 Write-Host " Backend API: http://localhost:$BackendPort"
+if ($DiscordToken) {
+    Write-Host " Discord    : Active" -ForegroundColor Cyan
+}
 
 # Brain Status Summary
 try {

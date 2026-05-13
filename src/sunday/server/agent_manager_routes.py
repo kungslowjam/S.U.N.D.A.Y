@@ -1715,6 +1715,11 @@ def create_agent_manager_router(
                         model=srv_model,
                     )
                     logger.info("Discord daemon started (PID %d)", pid)
+                    
+                    # Auto-save to .env for persistence
+                    from sunday.core.credentials import update_env_variable
+                    if update_env_variable("DISCORD_BOT_TOKEN", bot_token):
+                        logger.info("Saved DISCORD_BOT_TOKEN to .env")
                 except Exception as exc:
                     logger.warning("Failed to start Discord: %s", exc)
 

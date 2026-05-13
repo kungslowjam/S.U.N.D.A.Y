@@ -34,40 +34,80 @@ def run_discord_daemon(
 ) -> None:
     import asyncio
     import discord
-    from sunday.agents.deep_research import DeepResearchAgent
-    from sunday.engine.ollama import OllamaEngine
-    from sunday.server.agent_manager_routes import _build_deep_research_tools
+    from pathlib import Path
 
     # Write PID
     pid_path = Path(_PID_FILE)
     pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()))
 
-    # Build engine using SUNDAY's discovery logic
-    from sunday.core.config import load_config
+    from sunday.agents.orchestrator import OrchestratorAgent
+    from sunday.core.registry import ToolRegistry
+
+    # Build dependencies for knowledge tools
+    from sunday.core.config import load_config, DEFAULT_CONFIG_DIR
+    from sunday.connectors.store import KnowledgeStore
+    from sunday.connectors.retriever import TwoStageRetriever
     from sunday.engine import discover_engines
     from sunday.engine.multi import MultiEngine
-    
+
     config = load_config()
     all_engines = discover_engines(config)
-    
-    # Add llamacpp explicitly if it's missing but we have a .gguf model
-    found_llamacpp = any(ek == "llamacpp" for ek, _ in all_engines)
-    if not found_llamacpp and model.endswith(".gguf"):
-        from sunday.engine.openai_compat_engines import LlamaCppEngine
-        host = getattr(config.engine, "llamacpp_host", "http://localhost:8081")
-        all_engines.append(("llamacpp", LlamaCppEngine(host=host)))
-        
     engine = MultiEngine(all_engines)
     
-    tools = _build_deep_research_tools(engine=engine, model=model)
-    agent = DeepResearchAgent(
+    knowledge_db_path = str(DEFAULT_CONFIG_DIR / "knowledge.db")
+    store = None
+    retriever = None
+    if Path(knowledge_db_path).exists():
+        try:
+            store = KnowledgeStore(knowledge_db_path)
+            retriever = TwoStageRetriever(store)
+        except Exception as e:
+            logger.warning(f"Failed to initialize knowledge store: {e}")
+
+    # Build ALL tools from registry
+    tools = []
+    # Explicitly import all tool modules to populate registry
+    import sunday.tools
+    from sunday.server.agent_manager_routes import _ensure_registries_populated
+    _ensure_registries_populated()
+
+    for tool_name in ToolRegistry.keys():
+        try:
+            tool_cls = ToolRegistry.get(tool_name)
+            
+            # Instantiate with dependencies if needed
+            if tool_name in ("knowledge_search", "retrieval"):
+                if retriever:
+                    tools.append(tool_cls(retriever=retriever))
+            elif tool_name in ("knowledge_sql", "scan_chunks"):
+                if store:
+                    if tool_name == "scan_chunks":
+                        tools.append(tool_cls(store=store, engine=engine, model=model))
+                    else:
+                        tools.append(tool_cls(store=store))
+            elif tool_name == "think":
+                tools.append(tool_cls())
+            else:
+                # Try default instantiation
+                tools.append(tool_cls())
+        except Exception as e:
+            logger.debug(f"Skipping tool {tool_name} due to instantiation error: {e}")
+
+    agent = OrchestratorAgent(
         engine=engine,
         model=model,
         tools=tools,
-        max_turns=5,
+        max_turns=10,
+        system_prompt=(
+            "You are SUNDAY, a powerful personal AI assistant. "
+            "You have access to the user's private knowledge base, the web, "
+            "a web browser, and various system tools. "
+            "Help the user with any request by planning and using the best tools available. "
+            "Be conversational, concise, and helpful."
+        )
     )
-    logger.info(f"Discord daemon: agent ready using MultiEngine with {len(all_engines)} backends")
+    logger.info(f"Discord daemon: Orchestrator ready with {len(tools)} tools")
 
     intents = discord.Intents.default()
     intents.message_content = True
@@ -103,7 +143,25 @@ def run_discord_daemon(
         def _run_agent():
             try:
                 result = agent.run(text)
-                return result.content or "No results found."
+                final_content = result.content or "No results found."
+                
+                # Extract observability info
+                used_tools = sorted(list(set(tr.tool_name for tr in result.tool_results)))
+                sources = result.metadata.get("sources", [])
+                
+                # Build footer
+                footer_parts = []
+                if used_tools:
+                    footer_parts.append(f"🛠️ **Tools**: {', '.join(used_tools)}")
+                if sources:
+                    footer_parts.append(f"📚 **Sources**: {len(sources)} cited")
+                if result.turns > 1:
+                    footer_parts.append(f"🔄 **Turns**: {result.turns}")
+                
+                if footer_parts:
+                    final_content += "\n\n" + " | ".join(footer_parts)
+                
+                return final_content
             except Exception as exc:
                 logger.error(f"Discord daemon error: {exc}")
                 return f"Error: {exc}"

@@ -8,7 +8,42 @@ from __future__ import annotations
 
 import os
 import threading
+import logging
+import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def update_env_variable(key: str, value: str) -> bool:
+    """Update or add a variable in the .env file."""
+    try:
+        # Resolve project root (where .env lives)
+        # credentials.py is in src/sunday/core/
+        project_root = Path(__file__).parents[3]
+        env_path = project_root / ".env"
+
+        if not env_path.exists():
+            # Create if missing
+            env_path.write_text(f"{key}={value}\n")
+            return True
+
+        content = env_path.read_text()
+        
+        # Check if key exists
+        pattern = re.compile(rf"^{key}=.*$", re.MULTILINE)
+        if pattern.search(content):
+            # Update existing
+            new_content = pattern.sub(f"{key}={value}", content)
+        else:
+            # Append new
+            new_content = content.rstrip() + f"\n\n{key}={value}\n"
+
+        env_path.write_text(new_content)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to update .env file: {e}")
+        return False
 
 try:
     import tomllib
