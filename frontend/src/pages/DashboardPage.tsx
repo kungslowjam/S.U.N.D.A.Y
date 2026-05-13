@@ -1,6 +1,7 @@
 import { EnergyDashboard } from '../components/Dashboard/EnergyDashboard';
 import { CostComparison } from '../components/Dashboard/CostComparison';
 import { TraceDebugger } from '../components/Dashboard/TraceDebugger';
+import { KnowledgeChannelsOverview } from '../components/Dashboard/KnowledgeChannelsOverview';
 
 export function DashboardPage() {
   const now = new Date();
@@ -26,6 +27,10 @@ export function DashboardPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
           <EnergyDashboard />
           <CostComparison />
+        </div>
+
+        <div className="mb-4">
+          <KnowledgeChannelsOverview />
         </div>
 
         <TraceDebugger />

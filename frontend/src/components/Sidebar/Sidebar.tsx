@@ -16,6 +16,7 @@ import {
   ChevronDown,
   Sparkles,
   Mic,
+  Brain,
 } from 'lucide-react';
 import { ConversationList } from './ConversationList';
 import { useAppStore } from '../../lib/store';
@@ -46,7 +47,7 @@ export function Sidebar() {
   const navItems = [
     { path: '/dashboard', icon: BarChart3, label: 'Dashboard' },
     { path: 'http://127.0.0.1:8098', icon: Mic, label: 'Voice Live', external: true },
-    { path: '/data-sources', icon: Database, label: 'Data Sources' },
+    { path: '/data-sources', icon: Brain, label: 'Knowledge & Brain' },
     { path: '/agents', icon: Bot, label: 'Agents' },
     { path: '/skills', icon: Sparkles, label: 'Skills' },
     { path: '/logs', icon: ScrollText, label: 'Logs' },

@@ -89,6 +89,7 @@ def create_webhook_router(
     whatsapp_verify_token: str = "",
     whatsapp_app_secret: str = "",
     sendblue_channel: Any = None,
+    line_channel_secret: str = "",
 ) -> APIRouter:
     """Create a FastAPI router with webhook endpoints.
 
@@ -292,7 +293,22 @@ def create_webhook_router(
         token = request.query_params.get("hub.verify_token", "")
         challenge = request.query_params.get("hub.challenge", "")
 
-        if mode == "subscribe" and token == whatsapp_verify_token:
+        # Use fixed token or look up from agent bindings
+        v_token = whatsapp_verify_token
+        if not v_token:
+            mgr = getattr(request.app.state, "agent_manager", None)
+            if mgr:
+                for agent in mgr.list_agents():
+                    aid = agent.get("id", "")
+                    for b in mgr.list_channel_bindings(aid):
+                        if b.get("channel_type") == "whatsapp":
+                            v_token = b.get("config", {}).get("verify_token", "")
+                            if v_token:
+                                break
+                    if v_token:
+                        break
+
+        if mode == "subscribe" and v_token and token == v_token:
             return PlainTextResponse(challenge)
         return Response("Forbidden", status_code=403)
 
@@ -302,13 +318,28 @@ def create_webhook_router(
     ) -> Response:
         body_bytes = await request.body()
 
+        # Use fixed secret or look up from agent bindings
+        secret = whatsapp_app_secret
+        if not secret:
+            mgr = getattr(request.app.state, "agent_manager", None)
+            if mgr:
+                for agent in mgr.list_agents():
+                    aid = agent.get("id", "")
+                    for b in mgr.list_channel_bindings(aid):
+                        if b.get("channel_type") == "whatsapp":
+                            secret = b.get("config", {}).get("app_secret", "")
+                            if secret:
+                                break
+                    if secret:
+                        break
+
         # Verify signature
-        if whatsapp_app_secret:
+        if secret:
             signature = request.headers.get("X-Hub-Signature-256", "")
             expected = (
                 "sha256="
                 + hmac.new(
-                    whatsapp_app_secret.encode(),
+                    secret.encode(),
                     body_bytes,
                     hashlib.sha256,
                 ).hexdigest()
@@ -442,6 +473,72 @@ def create_webhook_router(
 
         task = asyncio.create_task(asyncio.to_thread(_handle_and_reply))
         task.add_done_callback(_log_task_exception)
+
+        return Response("OK", status_code=200)
+
+    # ----------------------------------------------------------
+    # LINE Messaging API
+    # ----------------------------------------------------------
+
+    @router.post("/line")
+    async def line_incoming(request: Request) -> Response:
+        body_bytes = await request.body()
+        signature = request.headers.get("X-Line-Signature", "")
+
+        # Use fixed secret or look up from agent bindings
+        secret = line_channel_secret
+        if not secret:
+            mgr = getattr(request.app.state, "agent_manager", None)
+            if mgr:
+                for agent in mgr.list_agents():
+                    aid = agent.get("id", "")
+                    for b in mgr.list_channel_bindings(aid):
+                        if b.get("channel_type") == "line":
+                            secret = b.get("config", {}).get("channel_secret", "")
+                            if secret:
+                                break
+                    if secret:
+                        break
+
+        if secret:
+            expected = hmac.new(
+                secret.encode(),
+                body_bytes,
+                hashlib.sha256,
+            ).digest()
+            import base64
+
+            expected_b64 = base64.b64encode(expected).decode()
+
+            if not hmac.compare_digest(signature, expected_b64):
+                return Response("Invalid signature", status_code=403)
+        else:
+            logger.warning("No LINE channel secret configured — signature check skipped")
+
+        payload = json.loads(body_bytes)
+        for event in payload.get("events", []):
+            if event.get("type") != "message":
+                continue
+            
+            msg = event.get("message", {})
+            if msg.get("type") != "text":
+                continue
+                
+            sender = event.get("source", {}).get("userId", "")
+            text = msg.get("text", "")
+            
+            if not sender or not text:
+                continue
+
+            task = asyncio.create_task(
+                asyncio.to_thread(
+                    bridge.handle_incoming,
+                    sender,
+                    text,
+                    "line",
+                )
+            )
+            task.add_done_callback(_log_task_exception)
 
         return Response("OK", status_code=200)
 

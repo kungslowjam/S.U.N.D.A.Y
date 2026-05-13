@@ -7,6 +7,10 @@ from typing import Any, Dict, List
 
 from sunday.core.types import Message
 from sunday.engine._stubs import InferenceEngine
+from sunday._rust_bridge import Tokenizer
+import os
+
+_LOADED_TOKENIZERS = set()
 
 
 class EngineConnectionError(Exception):
@@ -53,19 +57,36 @@ def messages_to_dicts(messages: Sequence[Message]) -> List[Dict[str, Any]]:
     return out
 
 
-def estimate_prompt_tokens(messages: Sequence[Message]) -> int:
+def estimate_prompt_tokens(messages: Sequence[Message], model_name: str = "default") -> int:
     """Estimate full prompt token count from message content.
 
-    Ollama's ``prompt_eval_count`` may report only *newly evaluated*
-    tokens when KV-cache hits occur, under-counting the system prompt
-    and earlier conversation turns.  This helper provides a
-    cache-agnostic estimate so that downstream cost / FLOPs / energy
-    calculations reflect the true prompt size — matching what a cloud
-    provider would charge.
-
-    Uses ~4 characters per token (standard BPE average for English) plus
-    a small per-message overhead for role markers and separators.
+    Uses Rust-backed precise tokenizer if available, otherwise falls back to
+    rough character-based estimation.
     """
+    if Tokenizer:
+        # Auto-load if not already loaded and file exists
+        if model_name not in _LOADED_TOKENIZERS:
+            # Try common paths
+            paths = [
+                "llama-cpp/models/tokenizer.json",
+                "models/tokenizer.json",
+                f"models/{model_name}/tokenizer.json"
+            ]
+            for p in paths:
+                if os.path.exists(p):
+                    try:
+                        Tokenizer.load_from_file(model_name, p)
+                        _LOADED_TOKENIZERS.add(model_name)
+                        print(f"[✨ TOKENIZER] Loaded precise tokenizer for '{model_name}' from {p}")
+                        break
+                    except:
+                        continue
+
+        total = 0
+        for m in messages:
+            total += Tokenizer.count_tokens(model_name, m.content or "")
+        return total
+
     total_chars = sum(len(m.content) for m in messages)
     # ~4 tokens overhead per message for role markers / separators
     overhead = len(messages) * 4

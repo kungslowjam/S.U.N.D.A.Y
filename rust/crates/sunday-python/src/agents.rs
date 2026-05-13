@@ -372,6 +372,10 @@ impl PyLoopGuard {
         self.inner.check(tool_name, arguments)
     }
 
+    fn check_observation(&mut self, content: &str) -> Option<String> {
+        self.inner.check_observation(content)
+    }
+
     fn reset(&mut self) {
         self.inner.reset()
     }

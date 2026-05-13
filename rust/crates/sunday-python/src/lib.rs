@@ -76,6 +76,7 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<core::PyRoutingContext>()?;
     m.add_class::<core::PyAgentContext>()?;
     m.add_class::<core::PyAgentResult>()?;
+    m.add_class::<core::PyTokenizer>()?;
 
     // --- Engines ---
     m.add_class::<engine::PyEngine>()?;
@@ -100,6 +101,7 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<tools::PyGitStatusTool>()?;
     m.add_class::<tools::PyGitDiffTool>()?;
     m.add_class::<tools::PyGitLogTool>()?;
+    m.add_class::<tools::PyAXTreeProcessor>()?;
 
     // --- Storage / Memory ---
     m.add_class::<storage::PySQLiteMemory>()?;

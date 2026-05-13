@@ -137,7 +137,12 @@ class LoopGuard:
         return LoopVerdict()
 
     def check_response(self, content: str) -> LoopVerdict:
-        """Check whether an agent response indicates a loop. Reserved for future use."""
+        """Check whether an observation (tool output) indicates a loop."""
+        if self._rust_impl is not None:
+            rust_result = self._rust_impl.check_observation(content)
+            if rust_result is not None:
+                self._emit_triggered("semantic_loop", "observation")
+                return LoopVerdict(blocked=True, reason=rust_result)
         return LoopVerdict()
 
     @staticmethod

@@ -235,3 +235,25 @@ impl PyGitLogTool {
         Ok(result.content)
     }
 }
+
+#[pyclass(name = "AXTreeProcessor")]
+pub struct PyAXTreeProcessor {
+    pub inner: sunday_tools::browser_ax::AXTreeProcessor,
+}
+
+#[pymethods]
+impl PyAXTreeProcessor {
+    #[new]
+    #[pyo3(signature = (max_depth=10, filter_unimportant=true))]
+    fn new(max_depth: usize, filter_unimportant: bool) -> Self {
+        Self {
+            inner: sunday_tools::browser_ax::AXTreeProcessor::new(max_depth, filter_unimportant),
+        }
+    }
+
+    fn process_json(&self, ax_tree_json: &str) -> PyResult<String> {
+        let root: serde_json::Value = serde_json::from_str(ax_tree_json)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        Ok(self.inner.process(&root))
+    }
+}

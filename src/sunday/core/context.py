@@ -10,6 +10,7 @@ import logging
 from typing import List, Optional
 
 from sunday.core.types import Message, Role
+from sunday.engine._base import estimate_prompt_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +51,8 @@ class ContextManager:
         return m
 
     def estimate_tokens(self, messages: List[Message]) -> int:
-        """Rough token estimate (4 chars/token + overhead)."""
-        total_chars = sum(len(m.content or "") for m in messages)
-        overhead = len(messages) * 4
-        return (total_chars // 4) + overhead
+        """Estimate tokens using the engine's centralized logic (Rust-backed if available)."""
+        return estimate_prompt_tokens(messages)
 
     def trim_to_token_limit(
         self,

@@ -1683,6 +1683,41 @@ def create_agent_manager_router(
                         exc,
                     )
 
+        # Start Discord daemon
+        if req.channel_type == "discord":
+            config = req.config or {}
+            bot_token = config.get("bot_token", "")
+            if bot_token:
+                try:
+                    from sunday.channels.discord_daemon import (
+                        start_discord_daemon,
+                    )
+                    from sunday.channels.discord_daemon import (
+                        stop_daemon as stop_discord,
+                    )
+
+                    stop_discord()
+
+                    srv_model = (
+                        getattr(
+                            getattr(
+                                request.app.state,
+                                "engine",
+                                None,
+                            ),
+                            "_model",
+                            "qwen3.5:9b",
+                        )
+                        or "qwen3.5:9b"
+                    )
+                    pid = start_discord_daemon(
+                        bot_token=bot_token,
+                        model=srv_model,
+                    )
+                    logger.info("Discord daemon started (PID %d)", pid)
+                except Exception as exc:
+                    logger.warning("Failed to start Discord: %s", exc)
+
         return binding
 
     @agents_router.delete("/{agent_id}/channels/{binding_id}")
@@ -1707,6 +1742,12 @@ def create_agent_manager_router(
                     )
 
                     stop_slack_daemon()
+                elif ch_type == "discord":
+                    from sunday.channels.discord_daemon import (
+                        stop_daemon as stop_discord_daemon,
+                    )
+
+                    stop_discord_daemon()
         except Exception:
             pass
         manager.unbind_channel(binding_id)

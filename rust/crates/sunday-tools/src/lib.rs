@@ -1,6 +1,7 @@
 //! Tools primitive — BaseTool trait, ToolExecutor, built-in tools, storage backends.
 
 pub mod builtin;
+pub mod browser_ax;
 pub mod executor;
 pub mod rig_tools;
 pub mod storage;

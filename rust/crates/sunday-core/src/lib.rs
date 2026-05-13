@@ -9,6 +9,7 @@ pub mod events;
 pub mod hardware;
 pub mod model_catalog;
 pub mod registry;
+pub mod tokenizer;
 pub mod types;
 
 pub use config::{load_config, JarvisConfig};

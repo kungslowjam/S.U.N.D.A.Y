@@ -210,3 +210,21 @@ impl PyAgentResult {
         format!("AgentResult(turns={}, content='{}')", self.turns, &self.content[..self.content.len().min(50)])
     }
 }
+
+#[pyclass(name = "Tokenizer")]
+pub struct PyTokenizer;
+
+#[pymethods]
+impl PyTokenizer {
+    #[staticmethod]
+    fn load_from_file(name: String, path: String) -> PyResult<()> {
+        let p = std::path::Path::new(&path);
+        sunday_core::tokenizer::TOKENIZER.load_from_file(&name, p)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    #[staticmethod]
+    fn count_tokens(name: String, text: String) -> usize {
+        sunday_core::tokenizer::TOKENIZER.count_tokens(&name, &text)
+    }
+}

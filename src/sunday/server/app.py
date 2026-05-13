@@ -23,12 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def _restore_sendblue_bindings(app: FastAPI) -> None:
-    """Restore SendBlue channel bindings from the database on startup.
-
-    If a SendBlue binding was created via the Messaging tab and the server
-    restarts, this ensures the ChannelBridge + DeepResearchAgent are wired
-    up so incoming webhooks continue to work.
-    """
+    """Restore SendBlue channel bindings from the database on startup."""
     try:
         mgr = getattr(app.state, "agent_manager", None)
         if mgr is None:
@@ -112,6 +107,176 @@ def _restore_sendblue_bindings(app: FastAPI) -> None:
         logger.debug("SendBlue binding restore skipped: %s", exc)
 
 
+def _restore_line_bindings(app: FastAPI) -> None:
+    """Restore LINE channel bindings from the database on startup."""
+    try:
+        mgr = getattr(app.state, "agent_manager", None)
+        if mgr is None:
+            return
+
+        # Check all agents for line bindings
+        for agent in mgr.list_agents():
+            agent_id = agent.get("id", agent.get("agent_id", ""))
+            bindings = mgr.list_channel_bindings(agent_id)
+            for b in bindings:
+                if b.get("channel_type") != "line":
+                    continue
+                config = b.get("config", {})
+                token = config.get("channel_access_token", "")
+                secret = config.get("channel_secret", "")
+                if not token or not secret:
+                    continue
+
+                from sunday.channels.line_channel import LineChannel
+
+                lc = LineChannel(
+                    channel_access_token=token,
+                    channel_secret=secret,
+                    bus=getattr(app.state, "bus", None),
+                )
+                lc.connect()
+
+                # Add to existing bridge or create one
+                bridge = getattr(app.state, "channel_bridge", None)
+                if bridge and hasattr(bridge, "_channels"):
+                    bridge._channels["line"] = lc
+                else:
+                    from sunday.server.channel_bridge import ChannelBridge
+                    from sunday.server.session_store import SessionStore
+
+                    session_store = SessionStore()
+                    engine = getattr(app.state, "engine", None)
+                    dr_agent = None
+                    if engine:
+                        from sunday.server.agent_manager_routes import (
+                            _build_deep_research_tools,
+                        )
+                        tools = _build_deep_research_tools(engine=engine, model="")
+                        if tools:
+                            from sunday.agents.deep_research import DeepResearchAgent
+                            model_name = getattr(app.state, "model", "") or getattr(engine, "_model", "")
+                            dr_agent = DeepResearchAgent(engine=engine, model=model_name, tools=tools)
+
+                    bus = getattr(app.state, "bus", None)
+                    if bus is None:
+                        from sunday.core.events import EventBus
+                        bus = EventBus()
+
+                    app.state.channel_bridge = ChannelBridge(
+                        channels={"line": lc},
+                        session_store=session_store,
+                        bus=bus,
+                        agent_manager=mgr,
+                        deep_research_agent=dr_agent,
+                    )
+
+                logger.info("Restored LINE channel binding for agent: %s", agent_id)
+    except Exception as exc:
+        logger.debug("LINE binding restore skipped: %s", exc)
+
+
+def _restore_whatsapp_bindings(app: FastAPI) -> None:
+    """Restore WhatsApp channel bindings from the database on startup."""
+    try:
+        mgr = getattr(app.state, "agent_manager", None)
+        if mgr is None:
+            return
+
+        # Check all agents for whatsapp bindings
+        for agent in mgr.list_agents():
+            agent_id = agent.get("id", agent.get("agent_id", ""))
+            bindings = mgr.list_channel_bindings(agent_id)
+            for b in bindings:
+                if b.get("channel_type") != "whatsapp":
+                    continue
+                config = b.get("config", {})
+                token = config.get("access_token", "")
+                phone_id = config.get("phone_number_id", "")
+                if not token or not phone_id:
+                    continue
+
+                from sunday.channels.whatsapp import WhatsAppChannel
+
+                wc = WhatsAppChannel(
+                    access_token=token,
+                    phone_number_id=phone_id,
+                    bus=getattr(app.state, "bus", None),
+                )
+                wc.connect()
+
+                # Add to existing bridge or create one
+                bridge = getattr(app.state, "channel_bridge", None)
+                if bridge and hasattr(bridge, "_channels"):
+                    bridge._channels["whatsapp"] = wc
+                else:
+                    from sunday.server.channel_bridge import ChannelBridge
+                    from sunday.server.session_store import SessionStore
+
+                    session_store = SessionStore()
+                    engine = getattr(app.state, "engine", None)
+                    dr_agent = None
+                    if engine:
+                        from sunday.server.agent_manager_routes import (
+                            _build_deep_research_tools,
+                        )
+                        tools = _build_deep_research_tools(engine=engine, model="")
+                        if tools:
+                            from sunday.agents.deep_research import DeepResearchAgent
+                            model_name = getattr(app.state, "model", "") or getattr(engine, "_model", "")
+                            dr_agent = DeepResearchAgent(engine=engine, model=model_name, tools=tools)
+
+                    bus = getattr(app.state, "bus", None)
+                    if bus is None:
+                        from sunday.core.events import EventBus
+                        bus = EventBus()
+
+                    app.state.channel_bridge = ChannelBridge(
+                        channels={"whatsapp": wc},
+                        session_store=session_store,
+                        bus=bus,
+                        agent_manager=mgr,
+                        deep_research_agent=dr_agent,
+                    )
+
+                logger.info("Restored WhatsApp channel binding for agent: %s", agent_id)
+    except Exception as exc:
+        logger.debug("WhatsApp binding restore skipped: %s", exc)
+
+
+def _restore_discord_bindings(app: FastAPI) -> None:
+    """Restore Discord channel bindings and start the daemon on startup."""
+    try:
+        mgr = getattr(app.state, "agent_manager", None)
+        if mgr is None:
+            return
+
+        # Check all agents for discord bindings
+        for agent in mgr.list_agents():
+            agent_id = agent.get("id", agent.get("agent_id", ""))
+            bindings = mgr.list_channel_bindings(agent_id)
+            for b in bindings:
+                if b.get("channel_type") != "discord":
+                    continue
+                config = b.get("config", {})
+                token = config.get("bot_token", "")
+                if not token:
+                    continue
+
+                from sunday.channels.discord_daemon import start_discord_daemon
+
+                # Use the server's configured model or fallback
+                model_name = getattr(app.state, "model", "qwen3.5:9b")
+                
+                pid = start_discord_daemon(
+                    bot_token=token,
+                    model=model_name,
+                )
+                logger.info("Restored Discord channel binding (PID: %d) for agent: %s", pid, agent_id)
+                return  # Currently support one global Discord daemon
+    except Exception as exc:
+        logger.warning("Discord binding restore failed: %s", exc)
+
+
 # No-cache headers applied to static file responses
 _NO_CACHE_HEADERS = {
     "Cache-Control": "no-cache, no-store, must-revalidate",
@@ -157,23 +322,7 @@ def create_app(
     webhook_config: dict | None = None,
     cors_origins: list[str] | None = None,
 ) -> FastAPI:
-    """Create and configure the FastAPI application.
-
-    Parameters
-    ----------
-    engine:
-        The inference engine to use for completions.
-    model:
-        Default model name.
-    agent:
-        Optional agent instance for agent-mode completions.
-    bus:
-        Optional event bus for telemetry.
-    channel_bridge:
-        Optional channel bridge for multi-platform messaging.
-    config:
-        Optional JarvisConfig for other settings.
-    """
+    """Create and configure the FastAPI application."""
     app = FastAPI(
         title="SUNDAY API",
         description="OpenAI-compatible API server for SUNDAY",
@@ -188,11 +337,6 @@ def create_app(
         else [
             "http://localhost:5173",
             "http://127.0.0.1:5173",
-            # Tauri 2 production webview origins:
-            #   macOS / Linux / iOS  -> tauri://localhost
-            #   Windows / Android    -> http://tauri.localhost (default),
-            #                           https://tauri.localhost when
-            #                           windows.useHttpsScheme is enabled
             "tauri://localhost",
             "http://tauri.localhost",
             "https://tauri.localhost",
@@ -237,7 +381,7 @@ def create_app(
             if _bus is not None:
                 _trace_store.subscribe_to_bus(_bus)
     except Exception:
-        pass  # traces are optional; don't block server startup
+        pass
 
     app.include_router(router)
     app.include_router(speech_router)
@@ -248,13 +392,15 @@ def create_app(
     app.include_router(upload_router)
     include_all_routes(app)
 
-    # Restore SendBlue channel bindings from database on startup
+    # Restore channel bindings from database on startup
     _restore_sendblue_bindings(app)
+    _restore_line_bindings(app)
+    _restore_whatsapp_bindings(app)
+    _restore_discord_bindings(app)
 
     # Add security headers middleware
     try:
         from sunday.server.middleware import create_security_middleware
-
         middleware_cls = create_security_middleware()
         if middleware_cls is not None:
             app.add_middleware(middleware_cls)
@@ -265,30 +411,27 @@ def create_app(
     if api_key:
         try:
             from sunday.server.auth_middleware import AuthMiddleware
-
             app.add_middleware(AuthMiddleware, api_key=api_key)
         except Exception as exc:
             logger.debug("Auth middleware init skipped: %s", exc)
 
-    # Mount webhook routes (always — SendBlue may be configured dynamically)
+    # Mount webhook routes
     if webhook_config:
         try:
-            from sunday.server.webhook_routes import (
-                create_webhook_router,
-            )
-
+            from sunday.server.webhook_routes import create_webhook_router
             webhook_router = create_webhook_router(
                 bridge=channel_bridge,
                 twilio_auth_token=webhook_config.get("twilio_auth_token", ""),
                 bluebubbles_password=webhook_config.get("bluebubbles_password", ""),
                 whatsapp_verify_token=webhook_config.get("whatsapp_verify_token", ""),
                 whatsapp_app_secret=webhook_config.get("whatsapp_app_secret", ""),
+                line_channel_secret=webhook_config.get("line_channel_secret", ""),
             )
             app.include_router(webhook_router)
         except Exception as exc:
             logger.debug("Webhook routes init skipped: %s", exc)
 
-    # Serve static frontend assets if the static/ directory exists
+    # Serve static frontend assets
     static_dir = pathlib.Path(__file__).parent / "static"
     if static_dir.is_dir():
         assets_dir = static_dir / "assets"
@@ -301,10 +444,8 @@ def create_app(
 
         @app.get("/{full_path:path}")
         async def spa_catch_all(full_path: str):
-            """Serve static files directly, fall back to index.html for SPA routes."""
             if full_path:
                 candidate = (static_dir / full_path).resolve()
-                # Path traversal prevention
                 resolved_root = static_dir.resolve()
                 if candidate.is_relative_to(resolved_root) and candidate.is_file():
                     return FileResponse(candidate, headers=_NO_CACHE_HEADERS)

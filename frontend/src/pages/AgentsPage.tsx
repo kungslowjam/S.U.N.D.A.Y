@@ -2470,6 +2470,52 @@ const MESSAGING_CHANNELS: MessagingChannelConfig[] = [
     activeLabel: () => 'Connected to Slack',
     howToUse: () => 'Open Slack and DM @SUNDAY to talk to your agent.',
   },
+  {
+    type: 'line',
+    name: 'LINE',
+    icon: 'L',
+    description: 'Talk to your agent via LINE Messaging API',
+    setupSteps: [
+      '1. Create a Messaging API channel at developers.line.biz',
+      '2. In "Basic settings", find and copy your "Channel secret"',
+      '3. In "Messaging API" tab, find "Channel access token" and click "Issue", then copy it',
+      '4. Paste both below and click Connect',
+      '5. After connecting, set your Webhook URL in LINE Console to (replace with your public URL):',
+      'COPYABLE:https://<your-public-url>/webhooks/line',
+      '6. Enable "Use webhook" in the Messaging API settings',
+    ],
+    fields: [
+      { key: 'channel_access_token', label: 'Channel Access Token', placeholder: 'ey...', type: 'password', required: true },
+      { key: 'channel_secret', label: 'Channel Secret', placeholder: '32-character hex string', type: 'password', required: true },
+    ],
+    activeLabel: () => 'Connected to LINE',
+    howToUse: () => 'Open LINE and send a message to your Official Account.',
+  },
+  {
+    type: 'whatsapp',
+    name: 'WhatsApp',
+    icon: 'W',
+    description: 'Talk to your agent via WhatsApp Cloud API',
+    setupSteps: [
+      '1. Go to developers.facebook.com and create a "Business" app',
+      '2. Add "WhatsApp" product to your app',
+      '3. In "API Setup", copy your "Phone Number ID"',
+      '4. Generate a "Permanent Token" (or use a temporary one for testing)',
+      '5. In "Configuration", set your own "Verify Token" and paste it below',
+      '6. Paste your "App Secret" from "App Settings" -> "Basic"',
+      '7. After connecting, set your Webhook URL in Facebook Console to:',
+      'COPYABLE:https://<your-public-url>/webhooks/whatsapp',
+      '8. Enable "messages" webhook in the WhatsApp configuration',
+    ],
+    fields: [
+      { key: 'access_token', label: 'Access Token', placeholder: 'EA...', type: 'password', required: true },
+      { key: 'phone_number_id', label: 'Phone Number ID', placeholder: '15-digit ID', type: 'text', required: true },
+      { key: 'app_secret', label: 'App Secret', placeholder: '32-char hex string', type: 'password', required: true },
+      { key: 'verify_token', label: 'Verify Token', placeholder: 'your_custom_token', type: 'text', required: true },
+    ],
+    activeLabel: () => 'Connected to WhatsApp',
+    howToUse: () => 'Send a message to your WhatsApp Business number.',
+  },
 ];
 
 // ---------------------------------------------------------------------------

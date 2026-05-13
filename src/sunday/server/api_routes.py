@@ -59,6 +59,52 @@ class OptimizeRunRequest(BaseModel):
     max_samples: int = 50
 
 
+# ---- Brain routes ----
+
+brain_router = APIRouter(prefix="/v1/brain", tags=["brain"])
+
+
+@brain_router.get("/status")
+async def brain_status(request: Request):
+    """Get aggregated status of knowledge sources, messaging channels, and memory."""
+    # 1. Sources
+    source_count = 0
+    try:
+        from sunday.server.connectors_router import _get_connector_manager
+
+        mgr = _get_connector_manager()
+        source_count = len([c for c in mgr.list_connectors() if c.connected])
+    except Exception:
+        pass
+
+    # 2. Channels
+    channel_count = 0
+    try:
+        mgr = getattr(request.app.state, "agent_manager", None)
+        if mgr:
+            for agent in mgr.list_agents():
+                agent_id = agent.get("id", agent.get("agent_id", ""))
+                bindings = mgr.list_channel_bindings(agent_id)
+                channel_count += len(bindings)
+    except Exception:
+        pass
+
+    # 3. Memory
+    memory_chunks = 0
+    try:
+        backend = _get_memory_backend(request)
+        if backend:
+            memory_chunks = backend.count()
+    except Exception:
+        pass
+
+    return {
+        "sources": source_count,
+        "channels": channel_count,
+        "memory_chunks": memory_chunks,
+    }
+
+
 # ---- Agent routes ----
 
 agents_router = APIRouter(prefix="/v1/agents", tags=["agents"])
@@ -1294,6 +1340,7 @@ def include_all_routes(app) -> None:
     app.include_router(speech_router)
     app.include_router(feedback_router)
     app.include_router(optimize_router)
+    app.include_router(brain_router)
 
     # Agent Manager routes (if available)
     try:

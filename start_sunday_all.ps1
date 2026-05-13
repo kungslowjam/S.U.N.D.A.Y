@@ -214,8 +214,17 @@ Write-Host "       ALL SYSTEMS ARE GO! 🚀" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host " AI Engine  : http://localhost:$LlamaPort"
 Write-Host " Backend API: http://localhost:$BackendPort"
-# Write-Host " Dashboard  : http://localhost:$FrontendPort"
-# if ($StartVoiceLive) {
-#     Write-Host " Voice Live : http://localhost:$VoiceLivePort"
-# }
+
+# Brain Status Summary
+try {
+    $BrainStatus = Invoke-RestMethod -Uri "http://localhost:$BackendPort/v1/brain/status" -ErrorAction SilentlyContinue
+    if ($BrainStatus) {
+        Write-Host "----------------------------------------" -ForegroundColor DarkGray
+        Write-Host " Data Sources : $($BrainStatus.sources) connected" -ForegroundColor Cyan
+        Write-Host " Channels     : $($BrainStatus.channels) active" -ForegroundColor Cyan
+        Write-Host " Memory       : $($BrainStatus.memory_chunks) chunks indexed" -ForegroundColor Cyan
+    }
+} catch { }
+
 Write-Host "========================================"
+

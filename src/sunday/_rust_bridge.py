@@ -177,4 +177,19 @@ __all__ = [
     "retrieval_results_from_json",
     "scan_result_from_json",
     "trial_result_from_json",
+    "Tokenizer",
+    "AXTreeProcessor",
 ]
+
+def get_tokenizer():
+    """Return the Rust-backed Tokenizer class."""
+    mod = get_rust_module()
+    return getattr(mod, "Tokenizer", None)
+
+def get_axtree_processor():
+    """Return the Rust-backed AXTreeProcessor class."""
+    mod = get_rust_module()
+    return getattr(mod, "AXTreeProcessor", None)
+
+Tokenizer = get_tokenizer()
+AXTreeProcessor = get_axtree_processor()

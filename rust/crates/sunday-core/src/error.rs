@@ -100,6 +100,9 @@ pub enum EngineError {
 
     #[error("Timeout after {0}s")]
     Timeout(f64),
+
+    #[error("Tokenizer error: {0}")]
+    Tokenizer(String),
 }
 
 /// Tool execution errors.

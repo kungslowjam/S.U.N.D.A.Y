@@ -6,22 +6,26 @@ use std::collections::{HashSet, VecDeque};
 #[allow(dead_code)]
 pub struct LoopGuard {
     seen_hashes: HashSet<String>,
+    seen_fingerprints: Vec<u64>,
     recent_calls: VecDeque<String>,
     poll_budget: usize,
     poll_count: usize,
     max_identical: usize,
     max_ping_pong: usize,
+    fuzzy_threshold: u32,
 }
 
 impl LoopGuard {
     pub fn new(max_identical: usize, max_ping_pong: usize, poll_budget: usize) -> Self {
         Self {
             seen_hashes: HashSet::new(),
+            seen_fingerprints: Vec::new(),
             recent_calls: VecDeque::new(),
             poll_budget,
             poll_count: 0,
             max_identical,
             max_ping_pong,
+            fuzzy_threshold: 3, // Allow up to 3 bits difference
         }
     }
 
@@ -29,7 +33,7 @@ impl LoopGuard {
     pub fn check(&mut self, tool_name: &str, arguments: &str) -> Option<String> {
         let hash = self.hash_call(tool_name, arguments);
 
-        // Check identical calls
+        // Check identical calls (exact)
         if self.seen_hashes.contains(&hash) {
             return Some(format!(
                 "Loop detected: identical call to '{}' with same arguments",
@@ -37,6 +41,21 @@ impl LoopGuard {
             ));
         }
         self.seen_hashes.insert(hash);
+
+        // --- FUZZY MATCHING (SimHash) ---
+        // We only apply this to arguments that are large enough to be meaningful
+        if arguments.len() > 100 {
+            let fp = self.calculate_simhash(arguments);
+            for &seen_fp in &self.seen_fingerprints {
+                if self.hamming_distance(fp, seen_fp) <= self.fuzzy_threshold {
+                    return Some(format!(
+                        "Loop detected: call to '{}' is semantically identical to a previous call.",
+                        tool_name
+                    ));
+                }
+            }
+            self.seen_fingerprints.push(fp);
+        }
 
         // Check ping-pong pattern (A-B-A-B)
         self.recent_calls.push_back(tool_name.to_string());
@@ -72,6 +91,22 @@ impl LoopGuard {
         None
     }
 
+    /// Check an observation (tool output) for repeating semantic states.
+    pub fn check_observation(&mut self, content: &str) -> Option<String> {
+        if content.len() < 200 {
+            return None;
+        }
+
+        let fp = self.calculate_simhash(content);
+        for &seen_fp in &self.seen_fingerprints {
+            if self.hamming_distance(fp, seen_fp) <= self.fuzzy_threshold {
+                return Some("Loop detected: webpage structure is semantically identical to a previous state.".to_string());
+            }
+        }
+        self.seen_fingerprints.push(fp);
+        None
+    }
+
     pub fn reset(&mut self) {
         self.seen_hashes.clear();
         self.recent_calls.clear();
@@ -84,6 +119,44 @@ impl LoopGuard {
         hasher.update(b"|");
         hasher.update(arguments.as_bytes());
         format!("{:x}", hasher.finalize())
+    }
+
+    /// Calculate a 64-bit SimHash fingerprint for fuzzy matching.
+    pub fn calculate_simhash(&self, text: &str) -> u64 {
+        let mut v = [0i32; 64];
+        // Simple word-based shingling
+        for word in text.split_whitespace() {
+            let mut h = Sha256::new();
+            h.update(word.as_bytes());
+            let hash_bytes = h.finalize();
+            
+            // Use the first 8 bytes as a 64-bit hash
+            let mut hash_val = 0u64;
+            for i in 0..8 {
+                hash_val = (hash_val << 8) | hash_bytes[i] as u64;
+            }
+
+            for i in 0..64 {
+                if (hash_val >> i) & 1 == 1 {
+                    v[i] += 1;
+                } else {
+                    v[i] -= 1;
+                }
+            }
+        }
+
+        let mut fingerprint = 0u64;
+        for i in 0..64 {
+            if v[i] > 0 {
+                fingerprint |= 1 << i;
+            }
+        }
+        fingerprint
+    }
+
+    /// Calculate Hamming distance between two fingerprints.
+    pub fn hamming_distance(&self, f1: u64, f2: u64) -> u32 {
+        (f1 ^ f2).count_ones()
     }
 }
 

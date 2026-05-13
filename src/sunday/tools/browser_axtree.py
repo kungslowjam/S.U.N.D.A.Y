@@ -13,6 +13,8 @@ from typing import Any
 from sunday.core.registry import ToolRegistry
 from sunday.core.types import ToolResult
 from sunday.tools._stubs import BaseTool, ToolSpec
+from sunday._rust_bridge import AXTreeProcessor
+import json
 
 # Re-use the shared browser session from the browser module.
 # This is imported at module level so tests can patch
@@ -79,7 +81,15 @@ class BrowserAXTreeTool(BaseTool):
                     success=False,
                 )
 
-            text = _format_axtree(snapshot, max_depth=max_depth)
+            # --- RUST OPTIMIZATION: AXTree Semantic Filtering ---
+            if AXTreeProcessor:
+                # Use Rust for fast formatting and semantic noise reduction
+                processor = AXTreeProcessor(max_depth=max_depth, filter_unimportant=True)
+                # Playwright snapshot is a dict, Rust expects JSON string
+                text = processor.process_json(json.dumps(snapshot))
+            else:
+                # Fallback to slow Python formatting
+                text = _format_axtree(snapshot, max_depth=max_depth)
 
             return ToolResult(
                 tool_name="browser_axtree",
