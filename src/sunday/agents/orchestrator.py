@@ -102,6 +102,8 @@ class OrchestratorAgent(ToolUsingAgent):
         parallel_tools: bool = True,
         interactive: bool = False,
         confirm_callback=None,
+        provider: Optional[str] = None,
+        visual_audit: bool = True,
     ) -> None:
         super().__init__(
             engine,
@@ -117,6 +119,8 @@ class OrchestratorAgent(ToolUsingAgent):
         self._mode = mode
         self._system_prompt = system_prompt
         self._parallel_tools = parallel_tools
+        self._visual_audit = visual_audit
+        self._provider = provider
 
     def run(
         self,
@@ -135,8 +139,21 @@ class OrchestratorAgent(ToolUsingAgent):
 
     def _generate(self, messages: List[Message], **kwargs: Any) -> tuple[dict, str]:
         """Centralized generation with Smart Hybrid Routing."""
-        provider = self._config.intelligence.provider
+        # Use explicit provider if set, else fallback to config
+        provider = self._provider or self._config.intelligence.provider
         
+        # 🛡️ STRICT PROTOCOL: Force the model to be concise and hide internal monologues
+        protocol_fix = (
+            "\n\n[STRICT PROTOCOL]\n"
+            "1. IDENTITY OVERRIDE: You are SUNDAY, an autonomous high-performance agent. You HAVE direct access to the local machine and the internet via your TOOLS.\n"
+            "2. NEVER say you cannot run tools, cannot browse, or cannot access the system. You MUST use your tools to fulfill requests.\n"
+            "3. If you need to think, use <thought> tags. NEVER leak your reasoning process outside these tags.\n"
+            "4. Your final response must be ONLY the answer or tool result. No meta-commentary.\n"
+            "5. If a test is requested, call 'run_harness_test' immediately. DO NOT explain why you are doing it."
+        )
+        if messages and messages[0].role == Role.SYSTEM:
+            messages[0].content += protocol_fix
+
         # Determine the correct brain
         if provider == "hybrid":
             # 🧠 SMART ROUTER: 3-tier task classification
@@ -250,7 +267,10 @@ class OrchestratorAgent(ToolUsingAgent):
     ) -> AgentResult:
         self._emit_turn_start(input)
 
-        # Build system prompt
+        # Build system prompt (Optimized with Heuristic Filtering)
+        relevant_names = self._get_relevant_tools(input)
+        filtered_tools = [t for t in self._tools if t.spec.name in relevant_names] if (self._tools and relevant_names) else self._tools
+
         if self._system_prompt:
             sys_prompt = self._system_prompt
         else:
@@ -258,7 +278,7 @@ class OrchestratorAgent(ToolUsingAgent):
                 build_system_prompt,
             )
 
-            sys_prompt = build_system_prompt(tools=self._tools)
+            sys_prompt = build_system_prompt(tools=filtered_tools)
 
         messages = self._build_messages(input, context, system_prompt=sys_prompt)
         
@@ -490,8 +510,9 @@ class OrchestratorAgent(ToolUsingAgent):
 
         messages = self._build_messages(input, context)
 
-        # Get OpenAI-format tool definitions
-        openai_tools = self._executor.get_openai_tools() if self._tools else []
+        # Get OpenAI-format tool definitions (Optimized with Heuristic Filtering)
+        relevant_tools = self._get_relevant_tools(input)
+        openai_tools = self._executor.get_openai_tools(filter_names=relevant_tools) if self._tools else []
 
         all_tool_results: list[ToolResult] = []
         turns = 0
@@ -546,7 +567,7 @@ class OrchestratorAgent(ToolUsingAgent):
 
                 # 👁️ Visual Grounding Pattern (Priority 1): Auditor check before final answer
                 # Only run if the agent interacted with the browser during this session
-                if any(tr.tool_name.startswith("browser_") for tr in all_tool_results):
+                if self._visual_audit and any(tr.tool_name.startswith("browser_") for tr in all_tool_results):
                     audit_result = self._run_visual_audit(input, content)
                     if audit_result.startswith("REJECT:"):
                         print(f"[👁️ VISUAL REJECT] {audit_result}")
@@ -617,6 +638,8 @@ class OrchestratorAgent(ToolUsingAgent):
                 continue  # Skip execution and let the LLM plan again
 
             # Execute each tool (with loop guard check) and append results
+            # Note: We filter again here to ensure security/consistency if needed, 
+            # but usually OpenAI-tools filtering above is enough.
             if self._parallel_tools and len(tool_calls) > 1:
                 # Parallel execution
                 def _exec_tool(tc: ToolCall) -> tuple:
@@ -1023,5 +1046,55 @@ class OrchestratorAgent(ToolUsingAgent):
             return json.dumps(args, ensure_ascii=False)
         except:
             return arguments_json
+
+
+    def _get_relevant_tools(self, user_input: str) -> Optional[List[str]]:
+        """Heuristically select tools relevant to the current user input to reduce prompt bloat."""
+        if not self._tools:
+            return None
+            
+        all_names = [t.spec.name for t in self._tools]
+        
+        # ALWAYS keep these core tools for the Orchestrator
+        core_tools = {
+            "think", "delegate_browser", "delegate_coding", 
+            "list_tools", "reload_tools", "system_health"
+        }
+        
+        # CATEGORIES based on keywords
+        categories = {
+            "coding": ["file_read", "file_write", "create_tool_scaffold", "shell_exec", "graphify", "code_interpreter"],
+            "browser": ["browser_navigate", "browser_click", "browser_type", "browser_screenshot", "browser_extract", "browser_axtree", "e2e_browser_test"],
+            "search": ["web_search", "google_search"],
+            "testing": ["run_harness_test", "e2e_browser_test"],
+            "system": ["system_health"],
+            "meta": ["list_tools", "reload_tools"]
+        }
+        
+        query = user_input.lower()
+        selected = set(core_tools)
+        
+        # Match keywords (Thai + English)
+        if any(k in query for k in ["file", "code", "write", "read", "python", "script", "tool", "scaffold", "สร้าง", "เขียน", "ไฟล์"]):
+            selected.update(categories["coding"])
+        
+        if any(k in query for k in ["web", "search", "browse", "go to", "url", "site", "find", "ค้นหา", "เว็บ", "เช็ค", "ราคา"]):
+            selected.update(categories["browser"])
+            selected.update(categories["search"])
+            
+        if any(k in query for k in ["system", "health", "cpu", "ram", "disk", "เครื่อง", "สุขภาพ"]):
+            selected.add("system_health")
+            
+        if any(k in query for k in ["test", "verify", "harness", "check", "run", "ทดสอบ", "รัน", "ตรวจ"]):
+            selected.update(categories["testing"])
+
+        # Intersection with what's actually available
+        final_list = [name for name in all_names if name in selected]
+        
+        # If we matched nothing or it's too short, return everything to be safe
+        if len(final_list) <= len(core_tools) and len(query) > 50:
+             return None
+             
+        return final_list
 
 __all__ = ["OrchestratorAgent"]

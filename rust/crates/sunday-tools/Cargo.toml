@@ -23,6 +23,16 @@ sha2 = { workspace = true }
 chrono = { workspace = true }
 rig-core = { workspace = true }
 schemars = { workspace = true }
+chromiumoxide = { workspace = true }
+base64 = { workspace = true }
+sunday-vision = { path = "../sunday-vision", optional = true }
+futures = { workspace = true }
+
+rand = { workspace = true }
+
+[features]
+default = ["vision"]
+vision = ["dep:sunday-vision"]
 
 [dev-dependencies]
 tempfile = "3"

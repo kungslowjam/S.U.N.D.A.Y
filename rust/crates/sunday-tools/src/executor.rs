@@ -14,6 +14,7 @@ use std::time::Duration;
 pub struct ToolExecutor {
     tools: HashMap<String, BuiltinTool>,
     capability_policy: Option<CapabilityPolicy>,
+    path_guard: Option<sunday_security::capabilities::PathGuard>,
     bus: Option<Arc<EventBus>>,
     default_timeout: Duration,
 }
@@ -21,11 +22,13 @@ pub struct ToolExecutor {
 impl ToolExecutor {
     pub fn new(
         capability_policy: Option<CapabilityPolicy>,
+        path_guard: Option<sunday_security::capabilities::PathGuard>,
         bus: Option<Arc<EventBus>>,
     ) -> Self {
         Self {
             tools: HashMap::new(),
             capability_policy,
+            path_guard,
             bus,
             default_timeout: Duration::from_secs(30),
         }
@@ -82,10 +85,27 @@ impl ToolExecutor {
             }
         }
 
+        // Path check
+        if let Some(ref guard) = self.path_guard {
+            for key in ["path", "cwd", "dir"] {
+                if let Some(Value::String(p)) = params.get(key) {
+                    if !guard.is_safe(std::path::Path::new(p)) {
+                        return Err(SUNDAYError::Security(
+                            sunday_core::error::SecurityError::PolicyViolation(format!(
+                                "Path access denied: {} (parameter: {})",
+                                p, key
+                            )),
+                        ));
+                    }
+                }
+            }
+        }
+
         // Emit start event
         if let Some(ref bus) = self.bus {
-            let mut data = HashMap::new();
-            data.insert("tool_name".to_string(), Value::String(tool_name.to_string()));
+            let data = serde_json::json!({
+                "tool_name": tool_name
+            });
             bus.publish(EventType::ToolCallStart, data);
         }
 
@@ -98,8 +118,9 @@ impl ToolExecutor {
 
         if elapsed > timeout {
             if let Some(ref bus) = self.bus {
-                let mut data = HashMap::new();
-                data.insert("tool_name".to_string(), Value::String(tool_name.to_string()));
+                let data = serde_json::json!({
+                    "tool_name": tool_name
+                });
                 bus.publish(EventType::ToolTimeout, data);
             }
             return Err(SUNDAYError::Tool(ToolError::Timeout(
@@ -110,11 +131,10 @@ impl ToolExecutor {
 
         // Emit end event
         if let Some(ref bus) = self.bus {
-            let mut data = HashMap::new();
-            data.insert("tool_name".to_string(), Value::String(tool_name.to_string()));
-            data.insert("duration_seconds".to_string(), Value::Number(
-                serde_json::Number::from_f64(elapsed.as_secs_f64()).unwrap(),
-            ));
+            let data = serde_json::json!({
+                "tool_name": tool_name,
+                "duration_seconds": elapsed.as_secs_f64()
+            });
             bus.publish(EventType::ToolCallEnd, data);
         }
 
@@ -128,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_executor_register_and_execute() {
-        let mut exec = ToolExecutor::new(None, None);
+        let mut exec = ToolExecutor::new(None, None, None);
         exec.register(BuiltinTool::Calculator(crate::builtin::calculator::CalculatorTool));
         let result = exec
             .execute("calculator", &serde_json::json!({"expression": "2+2"}), None, None)
@@ -138,7 +158,7 @@ mod tests {
 
     #[test]
     fn test_executor_tool_not_found() {
-        let exec = ToolExecutor::new(None, None);
+        let exec = ToolExecutor::new(None, None, None);
         let err = exec
             .execute("nonexistent", &serde_json::json!({}), None, None)
             .unwrap_err();

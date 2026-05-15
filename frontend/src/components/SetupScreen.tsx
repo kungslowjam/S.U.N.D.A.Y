@@ -3,7 +3,7 @@ import { Loader2, CheckCircle2, XCircle, Cpu, Server, Database } from 'lucide-re
 import { getSetupStatus, type SetupStatus } from '../lib/api';
 
 const STEPS = [
-  { key: 'ollama_ready', label: 'Inference Engine', icon: Cpu, detail: 'Starting Ollama...' },
+  { key: 'ollama_ready', label: 'Inference Engine', icon: Cpu, detail: 'Starting llama.cpp...' },
   { key: 'model_ready', label: 'AI Model', icon: Database, detail: 'Loading model...' },
   { key: 'server_ready', label: 'API Server', icon: Server, detail: 'Starting server...' },
 ] as const;

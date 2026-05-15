@@ -2,6 +2,8 @@
 
 pub mod builtin;
 pub mod browser_ax;
+pub mod browser_native;
+pub mod browser_native_js;
 pub mod executor;
 pub mod rig_tools;
 pub mod storage;

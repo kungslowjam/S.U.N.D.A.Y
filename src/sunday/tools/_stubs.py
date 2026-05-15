@@ -375,9 +375,15 @@ class ToolExecutor:
         """Return specs for all available tools."""
         return [t.spec for t in self._tools.values()]
 
-    def get_openai_tools(self) -> List[Dict[str, Any]]:
+    def get_openai_tools(self, filter_names: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         """Return tools in OpenAI function-calling format."""
-        return [t.to_openai_function() for t in self._tools.values()]
+        if filter_names is None:
+            return [t.to_openai_function() for t in self._tools.values()]
+        return [
+            t.to_openai_function() 
+            for name, t in self._tools.items() 
+            if name in filter_names
+        ]
 
 
 def build_tool_descriptions(

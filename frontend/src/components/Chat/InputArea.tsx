@@ -235,7 +235,7 @@ export function InputArea() {
       if (!accumulatedContent) accumulatedContent = 'No response was generated. Please try again.';
       const totalMs = Date.now() - startTime;
       const _CLOUD_PREFIXES = ['gpt-', 'o1-', 'o3-', 'o4-', 'claude-', 'gemini-', 'openrouter/', 'MiniMax-', 'chatgpt-'];
-      const engineLabel = _CLOUD_PREFIXES.some(p => selectedModel.startsWith(p)) ? 'cloud' : 'ollama';
+      const engineLabel = _CLOUD_PREFIXES.some(p => selectedModel.startsWith(p)) ? 'cloud' : 'llama.cpp';
       const telemetry: MessageTelemetry = {
         engine: engineLabel, model_id: selectedModel, total_ms: totalMs, ttft_ms: ttftMs,
         tokens_per_sec: usage?.completion_tokens ? usage.completion_tokens / (totalMs / 1000) : undefined,

@@ -407,7 +407,7 @@ export function CommandPalette() {
                 );
               })}
               <div className="px-4 py-3 mt-1" style={{ borderTop: '1px solid var(--color-border)' }}>
-                <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Or enter any Ollama model name:</div>
+                <div className="text-[11px] mb-2" style={{ color: 'var(--color-text-tertiary)' }}>Or enter any model name:</div>
                 <div className="flex gap-2">
                   <input
                     type="text" value={customModel}
@@ -534,7 +534,7 @@ export function CommandPalette() {
               <span><kbd className="font-mono">Esc</kbd> Close</span>
             </>
           ) : tab === 'catalogue' ? (
-            <span>Models are downloaded from the Ollama registry</span>
+            <span>Models are downloaded from the model registry</span>
           ) : (
             <span>API keys are stored locally and never sent to SUNDAY servers</span>
           )}

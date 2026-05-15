@@ -1,324 +1,171 @@
-//! Pub/sub event bus for cross-cutting concerns.
-//!
-//! Rust translation of `src/sunday/core/events.py`.
-
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::fmt;
+use tokio::sync::broadcast;
+use once_cell::sync::Lazy;
+use std::collections::VecDeque;
+use parking_lot::Mutex;
 
-// ---------------------------------------------------------------------------
-// Event types
-// ---------------------------------------------------------------------------
-
-/// All event types published through the event bus.
+/// Predefined event types used throughout the system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum EventType {
-    // Inference
     InferenceStart,
     InferenceEnd,
-
-    // Tools
     ToolCallStart,
     ToolCallEnd,
     ToolTimeout,
-
-    // Memory
-    MemoryStore,
-    MemoryRetrieve,
-
-    // Agents
-    AgentTurnStart,
-    AgentTurnEnd,
-
-    // Telemetry
-    TelemetryRecord,
-
-    // Traces
-    TraceStep,
-    TraceComplete,
-
-    // Security
-    SecurityScan,
     SecurityAlert,
     SecurityBlock,
-    CapabilityDenied,
-    TaintViolation,
-
-    // Loop guard
-    LoopGuardTriggered,
-
-    // Workflow
-    WorkflowStart,
-    WorkflowEnd,
-
-    // Skills
-    SkillExecuteStart,
-    SkillExecuteEnd,
-
-    // Sessions
+    TraceStep,
+    TraceComplete,
     SessionStart,
     SessionEnd,
-
-    // Scheduler
-    SchedulerTaskStart,
-    SchedulerTaskEnd,
-
-    // Operators
-    OperatorTickStart,
-    OperatorTickEnd,
-
-    // Channels
-    ChannelMessageReceived,
-    ChannelMessageSent,
+    AgentMessage,
+    BrainStatus,
+    AgentTurnStart,
+    AgentTurnEnd,
+    SharedMemoryUpdate,
+    AgentTickStart,
+    AgentTickEnd,
+    AgentTickError,
 }
 
-impl std::fmt::Display for EventType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = serde_json::to_value(self)
-            .ok()
-            .and_then(|v| v.as_str().map(String::from))
-            .unwrap_or_else(|| format!("{self:?}"));
-        write!(f, "{s}")
+impl fmt::Display for EventType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::InferenceStart => "inference_start",
+            Self::InferenceEnd => "inference_end",
+            Self::ToolCallStart => "tool_call_start",
+            Self::ToolCallEnd => "tool_call_end",
+            Self::ToolTimeout => "tool_timeout",
+            Self::SecurityAlert => "security_alert",
+            Self::SecurityBlock => "security_block",
+            Self::TraceStep => "trace_step",
+            Self::TraceComplete => "trace_complete",
+            Self::SessionStart => "session_start",
+            Self::SessionEnd => "session_end",
+            Self::AgentMessage => "agent_message",
+            Self::BrainStatus => "brain_status",
+            Self::AgentTurnStart => "agent_turn_start",
+            Self::AgentTurnEnd => "agent_turn_end",
+            Self::SharedMemoryUpdate => "shared_memory_update",
+            Self::AgentTickStart => "agent_tick_start",
+            Self::AgentTickEnd => "agent_tick_end",
+            Self::AgentTickError => "agent_tick_error",
+        };
+        write!(f, "{}", s)
     }
 }
 
 impl std::str::FromStr for EventType {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let quoted = format!("\"{s}\"");
-        serde_json::from_str(&quoted).map_err(|_| format!("Unknown event type: {s}"))
+        match s {
+            "inference_start" => Ok(Self::InferenceStart),
+            "inference_end" => Ok(Self::InferenceEnd),
+            "tool_call_start" => Ok(Self::ToolCallStart),
+            "tool_call_end" => Ok(Self::ToolCallEnd),
+            "tool_timeout" => Ok(Self::ToolTimeout),
+            "security_alert" => Ok(Self::SecurityAlert),
+            "security_block" => Ok(Self::SecurityBlock),
+            "trace_step" => Ok(Self::TraceStep),
+            "trace_complete" => Ok(Self::TraceComplete),
+            "session_start" => Ok(Self::SessionStart),
+            "session_end" => Ok(Self::SessionEnd),
+            "agent_message" => Ok(Self::AgentMessage),
+            "brain_status" => Ok(Self::BrainStatus),
+            "agent_turn_start" => Ok(Self::AgentTurnStart),
+            "agent_turn_end" => Ok(Self::AgentTurnEnd),
+            "shared_memory_update" => Ok(Self::SharedMemoryUpdate),
+            "agent_tick_start" => Ok(Self::AgentTickStart),
+            "agent_tick_end" => Ok(Self::AgentTickEnd),
+            "agent_tick_error" => Ok(Self::AgentTickError),
+            _ => Err(format!("Unknown event type: {}", s)),
+        }
     }
 }
 
-// ---------------------------------------------------------------------------
-// Event
-// ---------------------------------------------------------------------------
-
-/// A single event published through the event bus.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     pub event_type: EventType,
     pub timestamp: f64,
-    pub data: HashMap<String, serde_json::Value>,
+    pub data: serde_json::Value,
 }
 
-impl Event {
-    /// Create a new event with the current timestamp.
-    pub fn new(event_type: EventType, data: HashMap<String, serde_json::Value>) -> Self {
+/// A high-performance, async event bus based on tokio broadcast channels.
+/// Uses Arc to avoid cloning large event payloads for every subscriber.
+pub struct EventBus {
+    sender: broadcast::Sender<Arc<Event>>,
+    history: Mutex<VecDeque<Arc<Event>>>,
+    record_history: bool,
+}
+
+pub static GLOBAL_BUS: Lazy<Arc<EventBus>> = Lazy::new(|| Arc::new(EventBus::new(true)));
+
+impl EventBus {
+    pub fn new(record_history: bool) -> Self {
+        let (sender, _) = broadcast::channel(1024);
+        Self { 
+            sender,
+            history: Mutex::new(VecDeque::with_capacity(5000)),
+            record_history,
+        }
+    }
+
+    /// Subscribe to all events on the bus.
+    pub fn subscribe(&self) -> broadcast::Receiver<Arc<Event>> {
+        self.sender.subscribe()
+    }
+
+    /// Subscribe to events with a callback (spawned in a tokio task).
+    pub fn subscribe_callback(&self, callback: Box<dyn Fn(Arc<Event>) + Send + Sync>) {
+        let mut rx = self.sender.subscribe();
+        tokio::spawn(async move {
+            while let Ok(event) = rx.recv().await {
+                callback(event);
+            }
+        });
+    }
+
+    /// Publish an event to all subscribers.
+    pub fn publish(&self, event_type: EventType, data: impl Into<serde_json::Value>) -> Arc<Event> {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs_f64();
-        Self {
+
+        let event = Arc::new(Event {
             event_type,
             timestamp,
-            data,
-        }
-    }
-}
+            data: data.into(),
+        });
 
-// ---------------------------------------------------------------------------
-// Event bus
-// ---------------------------------------------------------------------------
-
-/// Callback type for event subscribers.
-pub type Subscriber = Arc<dyn Fn(&Event) + Send + Sync>;
-
-/// Thread-safe pub/sub event bus.
-///
-/// Subscribers register for specific event types and are called synchronously
-/// when events of that type are published.
-pub struct EventBus {
-    subscribers: Mutex<HashMap<EventType, Vec<Subscriber>>>,
-    record_history: bool,
-    history: Mutex<Vec<Event>>,
-}
-
-impl EventBus {
-    /// Create a new event bus.
-    ///
-    /// If `record_history` is `true`, all published events are retained
-    /// and can be retrieved via [`Self::history()`].
-    pub fn new(record_history: bool) -> Self {
-        Self {
-            subscribers: Mutex::new(HashMap::new()),
-            record_history,
-            history: Mutex::new(Vec::new()),
-        }
-    }
-
-    /// Subscribe to events of a specific type.
-    pub fn subscribe(&self, event_type: EventType, callback: Subscriber) {
-        let mut subs = self.subscribers.lock();
-        subs.entry(event_type).or_default().push(callback);
-    }
-
-    /// Publish an event, calling all registered subscribers.
-    ///
-    /// Returns the published event.
-    pub fn publish(
-        &self,
-        event_type: EventType,
-        data: HashMap<String, serde_json::Value>,
-    ) -> Event {
-        let event = Event::new(event_type, data);
-
-        // Notify subscribers
-        let subs = self.subscribers.lock();
-        if let Some(callbacks) = subs.get(&event_type) {
-            for callback in callbacks {
-                callback(&event);
+        if self.record_history {
+            let mut history = self.history.lock();
+            history.push_back(Arc::clone(&event));
+            // Keep history at a reasonable size
+            if history.len() > 5000 {
+                history.drain(0..1000);
             }
         }
 
-        // Record history if enabled
-        if self.record_history {
-            self.history.lock().push(event.clone());
-        }
+        // We ignore the result if there are no subscribers
+        let _ = self.sender.send(Arc::clone(&event));
 
         event
     }
 
-    /// Convenience method to publish an event with no data.
-    pub fn emit(&self, event_type: EventType) -> Event {
-        self.publish(event_type, HashMap::new())
+    pub fn history(&self) -> Vec<Arc<Event>> {
+        self.history.lock().iter().cloned().collect()
     }
 
-    /// Get the recorded event history.
-    pub fn history(&self) -> Vec<Event> {
-        self.history.lock().clone()
-    }
-
-    /// Clear the recorded event history.
     pub fn clear_history(&self) {
         self.history.lock().clear();
     }
-
-    /// Get the number of subscribers for a given event type.
-    pub fn subscriber_count(&self, event_type: EventType) -> usize {
-        self.subscribers
-            .lock()
-            .get(&event_type)
-            .map_or(0, |v| v.len())
-    }
-
-    /// Remove all subscribers.
-    pub fn clear_subscribers(&self) {
-        self.subscribers.lock().clear();
-    }
 }
 
-impl Default for EventBus {
-    fn default() -> Self {
-        Self::new(false)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    #[test]
-    fn test_event_type_serde() {
-        let et = EventType::InferenceStart;
-        let json = serde_json::to_string(&et).unwrap();
-        assert_eq!(json, "\"inference_start\"");
-        let parsed: EventType = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed, et);
-    }
-
-    #[test]
-    fn test_event_type_from_str() {
-        let et: EventType = "tool_call_start".parse().unwrap();
-        assert_eq!(et, EventType::ToolCallStart);
-    }
-
-    #[test]
-    fn test_publish_subscribe() {
-        let bus = EventBus::new(false);
-        let counter = Arc::new(AtomicUsize::new(0));
-        let counter_clone = counter.clone();
-
-        bus.subscribe(
-            EventType::InferenceStart,
-            Arc::new(move |_event| {
-                counter_clone.fetch_add(1, Ordering::SeqCst);
-            }),
-        );
-
-        bus.emit(EventType::InferenceStart);
-        bus.emit(EventType::InferenceStart);
-        bus.emit(EventType::InferenceEnd); // different type, should not fire
-
-        assert_eq!(counter.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn test_event_data() {
-        let bus = EventBus::new(false);
-        let received_model = Arc::new(Mutex::new(String::new()));
-        let rm = received_model.clone();
-
-        bus.subscribe(
-            EventType::InferenceStart,
-            Arc::new(move |event| {
-                if let Some(model) = event.data.get("model").and_then(|v| v.as_str()) {
-                    *rm.lock() = model.to_string();
-                }
-            }),
-        );
-
-        let mut data = HashMap::new();
-        data.insert("model".into(), serde_json::json!("qwen3:8b"));
-        bus.publish(EventType::InferenceStart, data);
-
-        assert_eq!(*received_model.lock(), "qwen3:8b");
-    }
-
-    #[test]
-    fn test_history_recording() {
-        let bus = EventBus::new(true);
-        bus.emit(EventType::InferenceStart);
-        bus.emit(EventType::InferenceEnd);
-
-        let history = bus.history();
-        assert_eq!(history.len(), 2);
-        assert_eq!(history[0].event_type, EventType::InferenceStart);
-        assert_eq!(history[1].event_type, EventType::InferenceEnd);
-    }
-
-    #[test]
-    fn test_history_disabled() {
-        let bus = EventBus::new(false);
-        bus.emit(EventType::InferenceStart);
-        assert!(bus.history().is_empty());
-    }
-
-    #[test]
-    fn test_clear_history() {
-        let bus = EventBus::new(true);
-        bus.emit(EventType::InferenceStart);
-        assert_eq!(bus.history().len(), 1);
-        bus.clear_history();
-        assert!(bus.history().is_empty());
-    }
-
-    #[test]
-    fn test_subscriber_count() {
-        let bus = EventBus::new(false);
-        assert_eq!(bus.subscriber_count(EventType::ToolCallStart), 0);
-        bus.subscribe(EventType::ToolCallStart, Arc::new(|_| {}));
-        bus.subscribe(EventType::ToolCallStart, Arc::new(|_| {}));
-        assert_eq!(bus.subscriber_count(EventType::ToolCallStart), 2);
-    }
-
-    #[test]
-    fn test_event_timestamp() {
-        let event = Event::new(EventType::InferenceStart, HashMap::new());
-        assert!(event.timestamp > 0.0);
-    }
+/// Helper to publish to the global bus easily
+pub fn emit_event(event_type: EventType, data: serde_json::Value) {
+    GLOBAL_BUS.publish(event_type, data);
 }

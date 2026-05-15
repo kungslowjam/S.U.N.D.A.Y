@@ -54,6 +54,14 @@ impl PySessionStore {
         self.inner.link_channel(session_id, channel, channel_user_id);
     }
 
+    fn set_metadata_key(&self, session_id: &str, key: &str, value_json: &str) -> PyResult<()> {
+        let value: serde_json::Value = serde_json::from_str(value_json)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        self.inner
+            .set_metadata_key(session_id, key, value)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
     fn list_sessions(&self, active_only: bool, limit: usize) -> String {
         let sessions = self.inner.list_sessions(active_only, limit);
         serde_json::to_string(&sessions).unwrap_or_default()

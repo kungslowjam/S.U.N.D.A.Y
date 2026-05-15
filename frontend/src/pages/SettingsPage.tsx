@@ -302,11 +302,11 @@ export function SettingsPage() {
 
           {/* Models */}
           <Section title="Models">
-            <SettingRow label="Available models" description="Models discovered from local directory and Ollama">
+            <SettingRow label="Available models" description="Models discovered from local directory and llama.cpp">
               <ModelList />
             </SettingRow>
             <div className="text-xs mt-2 px-1" style={{ color: 'var(--color-text-tertiary)' }}>
-              Run <code className="px-1 py-0.5 rounded text-[11px]" style={{ background: 'var(--color-bg-tertiary)' }}>ollama pull &lt;model-name&gt;</code> in your terminal to add more models
+              Place GGUF files in the models directory or configure your llama.cpp server to add more models
             </div>
             <SettingRow label="Cloud providers" description="Green dot means API key is configured">
               <div className="flex flex-wrap gap-3">

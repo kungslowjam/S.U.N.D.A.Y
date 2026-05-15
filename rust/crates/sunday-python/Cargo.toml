@@ -24,9 +24,14 @@ sunday-recipes = { path = "../sunday-recipes" }
 sunday-templates = { path = "../sunday-templates" }
 sunday-a2a = { path = "../sunday-a2a" }
 sunday-scheduler = { path = "../sunday-scheduler" }
+sunday-bench = { path = "../sunday-bench" }
+sunday-system = { path = "../sunday-system" }
+sunday-mining = { path = "../sunday-mining", features = ["python"] }
+sunday-sandbox = { path = "../sunday-sandbox", features = ["python"] }
 pyo3 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
+rayon = { workspace = true }

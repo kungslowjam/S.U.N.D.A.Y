@@ -32,7 +32,7 @@ function Test-Port {
     param([int]$Port)
     $tcp = New-Object System.Net.Sockets.TcpClient
     try {
-        $tcp.Connect("localhost", $Port)
+        $tcp.Connect("127.0.0.1", $Port)
         $tcp.Close()
         return $true
     } catch {
@@ -140,6 +140,35 @@ function Clear-Discord {
     }
 }
 
+# 0. Build Rust Bridge (High Performance Layer)
+Write-Host "[0/4] Checking Rust Bridge (sunday_rust)..." -ForegroundColor Cyan
+$StepStart = Get-Date
+try {
+    # Check if rustc is available
+    if (Get-Command rustc -ErrorAction SilentlyContinue) {
+        Write-Host "       Rust compiler found. Ensuring sunday_rust is built..." -ForegroundColor DarkGray
+        $MaturinPath = "$ProjectRoot\.venv\Scripts\maturin.exe"
+        if (Test-Path $MaturinPath) {
+            # Run maturin develop on the specific python bridge crate
+            Set-Location -Path "$ProjectRoot\rust"
+            & $MaturinPath develop --release -m crates/sunday-python/Cargo.toml
+            if ($LASTEXITCODE -ne 0) { 
+                Set-Location -Path $ProjectRoot
+                throw "💥 Maturin build failed. Please check the errors above." 
+            }
+            Set-Location -Path $ProjectRoot
+            Write-Host "       [OK] Rust Bridge is built and ready." -ForegroundColor Green
+        } else {
+            Write-Host "       [SKIP] maturin not found in .venv. Skipping auto-build." -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "       [SKIP] Rust compiler (rustc) not found. Please install from https://rustup.rs/ if needed." -ForegroundColor Yellow
+    }
+} catch {
+    Write-Host "       [WARN] Rust build step failed: $($_.Exception.Message)" -ForegroundColor Red
+}
+Write-Elapsed $StepStart
+
 Clear-Port $LlamaPort "AI Engine"
 Clear-Port $BackendPort "SUNDAY Backend"
 Clear-Port $FrontendPort "Frontend Dashboard"
@@ -152,11 +181,11 @@ if ($StartVoiceLive) {
 # 1. Start Llama-Server (AI Core)
 Write-Host "[1/4] Starting AI Engine (llama-server) on port $LlamaPort..." -ForegroundColor Cyan
 $StepStart = Get-Date
-if (Test-Http "http://localhost:$LlamaPort/v1/models" 2) {
+if (Test-Http "http://127.0.0.1:$LlamaPort/v1/models" 2) {
     Write-Host "[SKIP] AI Engine is already running." -ForegroundColor Yellow
 } elseif (Test-Port $LlamaPort) {
     Write-Host "[WAIT] AI Engine process is already starting." -ForegroundColor Yellow
-    Wait-ForHttp "http://localhost:$LlamaPort/v1/models" 180
+    Wait-ForHttp "http://127.0.0.1:$LlamaPort/v1/models" 180
 } else {
     $ModelArgs = if ($ModelSource -eq "hf") {
         @("-hf", $HfModel, "-hff", $HfFile)
@@ -174,7 +203,7 @@ if (Test-Http "http://localhost:$LlamaPort/v1/models" 2) {
     )
     $LlamaCommand = $LlamaArgs -join " "
     Start-ServiceProcess -Command "cd '$LlamaCppPath'; $LlamaCommand" -WorkingDirectory $LlamaCppPath
-    Wait-ForHttp "http://localhost:$LlamaPort/v1/models" 180
+    Wait-ForHttp "http://127.0.0.1:$LlamaPort/v1/models" 180
 }
 Write-Elapsed $StepStart
 Write-Host "[OK] AI Engine is ready." -ForegroundColor Green
@@ -183,12 +212,12 @@ Write-Host "[OK] AI Engine is ready." -ForegroundColor Green
 Write-Host "[2/4] Starting SUNDAY Backend on port $BackendPort..." -ForegroundColor Cyan
 $StepStart = Get-Date
 $SundayExe = "$ProjectRoot\.venv\Scripts\sunday.exe"
-if (Test-Http "http://localhost:$BackendPort/v1/models" 2) {
+if (Test-Http "http://127.0.0.1:$BackendPort/v1/models" 2) {
     Write-Host "[SKIP] SUNDAY Backend is already running." -ForegroundColor Yellow
 } else {
     # 🧠 Use 'multi' engine for hybrid support and explicitly set agent to 'orchestrator'
     Start-ServiceProcess -Command "`$env:OPENSUNDAY_CONFIG='$ConfigPath'; & '$SundayExe' serve --engine multi --agent orchestrator --host 127.0.0.1 --port $BackendPort" -WorkingDirectory $ProjectRoot
-    Wait-ForHttp "http://localhost:$BackendPort/v1/models" 90
+    Wait-ForHttp "http://127.0.0.1:$BackendPort/v1/models" 90
 }
 Write-Elapsed $StepStart
 Write-Host "[OK] SUNDAY Backend is ready." -ForegroundColor Green
@@ -196,12 +225,12 @@ Write-Host "[OK] SUNDAY Backend is ready." -ForegroundColor Green
 # 3. Start Frontend
 Write-Host "[3/4] Starting Frontend Dashboard on port $FrontendPort..." -ForegroundColor Cyan
 $StepStart = Get-Date
-if (Test-Http "http://localhost:$FrontendPort" 2) {
+if (Test-Http "http://127.0.0.1:$FrontendPort" 2) {
     Write-Host "[SKIP] Frontend Dashboard is already running." -ForegroundColor Yellow
 } else {
     # 🧠 Run Frontend in Hidden mode by default to reduce clutter
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "npm run dev" -WorkingDirectory "$ProjectRoot\frontend" -WindowStyle Hidden
-    Wait-ForHttp "http://localhost:$FrontendPort" 120
+    Wait-ForHttp "http://127.0.0.1:$FrontendPort" 120
 }
 Write-Elapsed $StepStart
 Write-Host "[OK] Frontend is ready." -ForegroundColor Green
@@ -245,21 +274,21 @@ if ($DiscordToken) {
 
 # 6. Open Browser
 Write-Host "Opening Dashboard..." -ForegroundColor Cyan
-Start-Process "http://localhost:$FrontendPort"
+Start-Process "http://127.0.0.1:$FrontendPort"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "       ALL SYSTEMS ARE GO! 🚀" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
-Write-Host " AI Engine  : http://localhost:$LlamaPort"
-Write-Host " Backend API: http://localhost:$BackendPort"
+Write-Host " AI Engine  : http://127.0.0.1:$LlamaPort"
+Write-Host " Backend API: http://127.0.0.1:$BackendPort"
 if ($DiscordToken) {
     Write-Host " Discord    : Active" -ForegroundColor Cyan
 }
 
 # Brain Status Summary
 try {
-    $BrainStatus = Invoke-RestMethod -Uri "http://localhost:$BackendPort/v1/brain/status" -ErrorAction SilentlyContinue
+    $BrainStatus = Invoke-RestMethod -Uri "http://127.0.0.1:$BackendPort/v1/brain/status" -ErrorAction SilentlyContinue
     if ($BrainStatus) {
         Write-Host "----------------------------------------" -ForegroundColor DarkGray
         Write-Host " Data Sources : $($BrainStatus.sources) connected" -ForegroundColor Cyan

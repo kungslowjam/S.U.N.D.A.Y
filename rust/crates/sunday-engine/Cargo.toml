@@ -17,6 +17,11 @@ futures = { workspace = true }
 tokio-stream = { workspace = true }
 rig-core = { workspace = true }
 schemars = { workspace = true }
+llama-cpp-2 = { workspace = true }
+encoding_rs = "0.8"
+regex = "1"
+
+
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }

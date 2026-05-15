@@ -106,7 +106,11 @@ channel-gmail = [
     "google-auth-oauthlib>=1.0",
     "google-auth-httplib2>=0.2",
 ]
-browser = ["playwright>=1.40"]
+browser = [
+    "playwright>=1.40",
+    "browser-use>=0.1.40; python_version >= '3.11'",
+    "langchain-openai>=0.2; python_version >= '3.11'",
+]
 media = ["openai>=1.30"]
 mining-pearl-vllm = ["docker>=7.0", "httpx>=0.27"]
 pdf = ["pdfplumber>=0.10"]
@@ -137,6 +141,7 @@ docs = [
     "mkdocs-gen-files>=0.5",
     "mkdocs-literate-nav>=0.6",
 ]
+coding = ["graphifyy>=0.1.0"]
 
 [project.urls]
 Homepage = "https://github.com/sunday-ai/SUNDAY"

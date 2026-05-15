@@ -1,0 +1,29 @@
+[package]
+name = "sunday-harness"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sunday-core = { path = "../sunday-core" }
+sunday-engine = { path = "../sunday-engine" }
+sunday-agents = { path = "../sunday-agents" }
+sunday-tools = { path = "../sunday-tools", default-features = false }
+sunday-telemetry = { path = "../sunday-telemetry" }
+sunday-learning = { path = "../sunday-learning" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+regex = { workspace = true }
+chrono = { workspace = true }
+image = { workspace = true }
+scraper = "0.22"
+chromiumoxide = { workspace = true }
+uuid = { workspace = true }
+futures = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }

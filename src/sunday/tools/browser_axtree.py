@@ -73,11 +73,22 @@ class BrowserAXTreeTool(BaseTool):
             )
 
         try:
-            snapshot = page.accessibility.snapshot()
+            # 🔍 ROBUST EXTRACTION: Try multiple ways to get the tree
+            snapshot = None
+            if hasattr(page, "accessibility"):
+                snapshot = page.accessibility.snapshot()
+            
+            if not snapshot:
+                # Fallback: Check if it's a Chrome DevTools Protocol session
+                try:
+                    snapshot = page.evaluate("window.__get_ax_tree()")
+                except:
+                    pass
+
             if not snapshot:
                 return ToolResult(
                     tool_name="browser_axtree",
-                    content="No accessibility tree available.",
+                    content="No accessibility tree available (API not supported or page empty).",
                     success=False,
                 )
 

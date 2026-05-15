@@ -1,0 +1,18 @@
+[package]
+name = "sunday-discord"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+sunday-core = { path = "../sunday-core" }
+sunday-agents = { path = "../sunday-agents" }
+sunday-engine = { path = "../sunday-engine" }
+sunday-tools = { path = "../sunday-tools", default-features = false }
+serenity = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenvy = "0.15"

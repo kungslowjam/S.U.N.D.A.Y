@@ -5,6 +5,7 @@ from __future__ import annotations
 import statistics
 import time
 from collections.abc import AsyncIterator
+from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Sequence
 
 from sunday.core.events import EventBus, EventType
@@ -262,7 +263,7 @@ class InstrumentedEngine(InferenceEngine):
         }
 
         self._bus.publish(EventType.INFERENCE_END, event_data)
-        self._bus.publish(EventType.TELEMETRY_RECORD, {"record": record})
+        self._bus.publish(EventType.TELEMETRY_RECORD, {"record": asdict(record)})
 
         # Inject telemetry dict into result for downstream consumers (eval backend)
         result["_telemetry"] = {
@@ -471,7 +472,7 @@ class InstrumentedEngine(InferenceEngine):
         }
 
         self._bus.publish(EventType.INFERENCE_END, event_data)
-        self._bus.publish(EventType.TELEMETRY_RECORD, {"record": record})
+        self._bus.publish(EventType.TELEMETRY_RECORD, {"record": asdict(record)})
 
     async def stream_full(
         self,

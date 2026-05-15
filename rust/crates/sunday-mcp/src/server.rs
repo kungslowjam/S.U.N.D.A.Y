@@ -111,7 +111,7 @@ mod tests {
     use sunday_tools::builtin::calculator::CalculatorTool;
 
     fn make_server() -> McpServer {
-        let mut exec = ToolExecutor::new(None, None);
+        let mut exec = ToolExecutor::new(None, None, None);
         exec.register(sunday_tools::builtin::BuiltinTool::Calculator(CalculatorTool));
         McpServer::new(Arc::new(exec))
     }

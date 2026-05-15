@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 sunday-core = { path = "../sunday-core" }
 sunday-engine = { path = "../sunday-engine" }
-sunday-tools = { path = "../sunday-tools" }
+sunday-tools = { path = "../sunday-tools", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

@@ -36,6 +36,7 @@ pub enum Engine {
     Nexa(OpenAICompatEngine),
     Uzu(OpenAICompatEngine),
     AppleFm(OpenAICompatEngine),
+    Native(crate::native::NativeLlamaEngine),
 }
 
 macro_rules! delegate_engine {
@@ -54,6 +55,7 @@ macro_rules! delegate_engine {
             Engine::Nexa(e) => e.$method($($arg),*),
             Engine::Uzu(e) => e.$method($($arg),*),
             Engine::AppleFm(e) => e.$method($($arg),*),
+            Engine::Native(e) => e.$method($($arg),*),
         }
     };
 }
@@ -97,6 +99,7 @@ impl InferenceEngine for Engine {
             Engine::Nexa(e) => e.stream(messages, model, temperature, max_tokens, extra).await,
             Engine::Uzu(e) => e.stream(messages, model, temperature, max_tokens, extra).await,
             Engine::AppleFm(e) => e.stream(messages, model, temperature, max_tokens, extra).await,
+            Engine::Native(e) => e.stream(messages, model, temperature, max_tokens, extra).await,
         }
     }
 
@@ -134,6 +137,7 @@ impl Engine {
             Engine::Nexa(_) => "nexa",
             Engine::Uzu(_) => "uzu",
             Engine::AppleFm(_) => "apple_fm",
+            Engine::Native(_) => "native",
         }
     }
 }

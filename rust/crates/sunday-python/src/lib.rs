@@ -11,6 +11,7 @@ pub(crate) static RUNTIME: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 
 pub mod a2a;
 pub mod agents;
+pub mod bench;
 pub mod core;
 pub mod engine;
 pub mod learning;
@@ -21,6 +22,8 @@ pub mod security;
 pub mod sessions;
 pub mod skills;
 pub mod storage;
+pub mod sandbox;
+pub mod system;
 pub mod telemetry;
 pub mod templates;
 pub mod tools;
@@ -102,6 +105,8 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<tools::PyGitDiffTool>()?;
     m.add_class::<tools::PyGitLogTool>()?;
     m.add_class::<tools::PyAXTreeProcessor>()?;
+    m.add_class::<tools::PyNativeBrowser>()?;
+    m.add_class::<tools::PyNativeMiner>()?;
 
     // --- Storage / Memory ---
     m.add_class::<storage::PySQLiteMemory>()?;
@@ -120,6 +125,7 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<security::PyInjectionScanner>()?;
     m.add_class::<security::PyRateLimiter>()?;
     m.add_class::<security::PyTaintSet>()?;
+    m.add_class::<sandbox::PyNativeSandbox>()?;
 
     // --- Telemetry ---
     m.add_class::<telemetry::PyTelemetryStore>()?;
@@ -180,6 +186,22 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // --- Scheduler ---
     m.add_class::<scheduler::PySchedulerStore>()?;
 
+    // --- Bench ---
+    m.add_class::<bench::PyBenchmarkResult>()?;
+    m.add_class::<bench::PyBenchmarkSuite>()?;
+    m.add_class::<bench::PyLatencyBenchmark>()?;
+    m.add_class::<bench::PyThroughputBenchmark>()?;
+    m.add_class::<bench::PyEnergyBenchmark>()?;
+
+    // --- System ---
+    m.add_class::<system::PyJarvisSystem>()?;
+    m.add_class::<system::PySystemBuilder>()?;
+    m.add_class::<system::PyQueryOrchestrator>()?;
+    m.add_class::<system::PySecurityContext>()?;
+    m.add_class::<system::PyObservability>()?;
+    m.add_class::<system::PyAgentRuntime>()?;
+    m.add_class::<system::PyScheduling>()?;
+
     // --- Module-level functions ---
     m.add_function(wrap_pyfunction!(load_config, m)?)?;
     m.add_function(wrap_pyfunction!(detect_hardware, m)?)?;
@@ -192,6 +214,8 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(templates::load_template, m)?)?;
     m.add_function(wrap_pyfunction!(a2a::parse_a2a_request, m)?)?;
     m.add_function(wrap_pyfunction!(scheduler::parse_cron_next, m)?)?;
+    m.add_function(wrap_pyfunction!(bench::bench_ensure_registered, m)?)?;
+    m.add_function(wrap_pyfunction!(bench::bench_compute_stats, m)?)?;
 
     Ok(())
 }

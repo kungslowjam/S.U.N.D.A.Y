@@ -1,0 +1,21 @@
+[package]
+name = "sunday-speech"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sunday-core = { path = "../sunday-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+ort = { workspace = true }
+hound = { workspace = true }
+parking_lot = { workspace = true }
+candle-core = { workspace = true }
+candle-transformers = { workspace = true }
+candle-nn = { workspace = true }
+tokenizers = { workspace = true }
+ndarray = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+anyhow = "1"

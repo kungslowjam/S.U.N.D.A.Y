@@ -1,0 +1,8 @@
+{
+  "test_tool": {
+    "latency_p50": 2.5,
+    "latency_p95": 2.5,
+    "count": 1,
+    "last_updated": 1778821676.827269
+  }
+}

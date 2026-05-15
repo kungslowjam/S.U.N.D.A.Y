@@ -1,5 +1,5 @@
 [recipe]
-name = "monitor_assistant"
+name = "🛰️ System Monitor"
 description = "Evidence-driven monitoring with code execution, causality tracking, and cross-session memory"
 version = "0.1.0"
 

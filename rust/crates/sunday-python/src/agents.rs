@@ -113,9 +113,9 @@ impl PyOrchestratorAgent {
         temperature: f64,
     ) -> PyResult<Self> {
         let adapter = make_adapter(engine_key, model)?;
-        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None));
+        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None, None));
         let agent = sunday_agents::OrchestratorAgent::new(
-            adapter, system_prompt, executor, max_turns, temperature,
+            adapter, system_prompt, executor, max_turns,
         );
         Ok(Self { inner: AgentEnum::Orchestrator(agent) })
     }
@@ -156,7 +156,7 @@ impl PyNativeReActAgent {
         temperature: f64,
     ) -> PyResult<Self> {
         let adapter = make_adapter(engine_key, model)?;
-        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None));
+        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None, None));
         let agent = sunday_agents::NativeReActAgent::new(
             adapter, executor, max_turns, temperature,
         );
@@ -206,7 +206,7 @@ impl PyNativeOpenHandsAgent {
             Arc::new(engine),
             model.to_string(),
         );
-        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None));
+        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None, None));
         let agent = sunday_agents::NativeOpenHandsAgent::new(
             adapter,
             executor,
@@ -287,7 +287,7 @@ impl PyMonitorOperativeAgent {
             Arc::new(engine),
             model.to_string(),
         );
-        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None));
+        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None, None));
 
         let mem_ext = match memory_extraction {
             "scratchpad" => sunday_agents::MemoryExtraction::Scratchpad,

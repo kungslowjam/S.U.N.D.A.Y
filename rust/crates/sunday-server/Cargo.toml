@@ -1,0 +1,31 @@
+[package]
+name = "sunday-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sunday-core = { path = "../sunday-core" }
+sunday-engine = { path = "../sunday-engine" }
+sunday-agents = { path = "../sunday-agents" }
+sunday-tools = { path = "../sunday-tools" }
+sunday-security = { path = "../sunday-security" }
+sunday-telemetry = { path = "../sunday-telemetry" }
+sunday-memory = { path = "../sunday-memory" }
+sunday-sessions = { path = "../sunday-sessions" }
+sunday-skills = { path = "../sunday-skills" }
+sunday-workflow = { path = "../sunday-workflow" }
+axum = { version = "0.7", features = ["ws", "multipart"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace", "set-header"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+mime_guess = "2"
+tokio-stream = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+async-stream = "0.3"

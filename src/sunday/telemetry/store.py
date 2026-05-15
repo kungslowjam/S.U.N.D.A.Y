@@ -252,6 +252,13 @@ INSERT INTO mining_stats (
 
     def _on_event(self, event: Event) -> None:
         rec = event.data.get("record")
+        if isinstance(rec, dict):
+            try:
+                # Convert dict back to TelemetryRecord
+                rec = TelemetryRecord(**rec)
+            except Exception:
+                return
+
         if isinstance(rec, TelemetryRecord):
             try:
                 self.record(rec)

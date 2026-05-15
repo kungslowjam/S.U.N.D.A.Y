@@ -1,0 +1,17 @@
+[package]
+name = "sunday-sandbox"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sunday-core = { path = "../sunday-core" }
+wasmtime = { workspace = true }
+wasi-common = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+pyo3 = { workspace = true, optional = true }
+anyhow = "1.0.102"
+
+[features]
+python = ["pyo3"]

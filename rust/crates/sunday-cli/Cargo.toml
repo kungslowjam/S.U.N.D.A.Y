@@ -1,0 +1,21 @@
+[package]
+name = "sunday-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sunday-core = { path = "../sunday-core" }
+clap = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sysinfo = { workspace = true }
+reqwest = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+thiserror = { workspace = true }
+indicatif = { workspace = true }
+dotenvy = "0.15"
+futures-util = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }

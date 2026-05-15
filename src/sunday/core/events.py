@@ -87,6 +87,39 @@ class Event:
     timestamp: float
     data: Dict[str, Any] = field(default_factory=dict)
 
+    @classmethod
+    def from_rust(cls, rust_event: Any) -> Event:
+        """Convert a Rust Event object to a Python Event dataclass."""
+        raw_type = str(rust_event.event_type)
+        
+        # Robust parsing: handle "EventType.NAME", "AGENT_TURN_START", or "agent_turn_start"
+        clean_type = raw_type.split(".")[-1].lower()
+        
+        try:
+            # Try to match by value (e.g. "agent_turn_start")
+            et = EventType(clean_type)
+        except ValueError:
+            # Fallback: try to match by name (e.g. if clean_type is "agent_turn_start" but we need "AGENT_TURN_START")
+            # Enums in Python can be tricky; let's try direct attribute access if it matches uppercase
+            try:
+                et = EventType[clean_type.upper()]
+            except (KeyError, ValueError):
+                # If all fails, use a generic record or re-raise with context
+                print(f"[WARN] Unknown event type from Rust: {raw_type} -> {clean_type}")
+                # We'll try to find any member that matches the value case-insensitively
+                for member in EventType:
+                    if member.value.lower() == clean_type:
+                        et = member
+                        break
+                else:
+                    raise ValueError(f"'{raw_type}' is not a valid EventType (tried value '{clean_type}')")
+
+        return cls(
+            event_type=et,
+            timestamp=rust_event.timestamp,
+            data=rust_event.data,
+        )
+
 
 # Type alias for subscriber callbacks
 Subscriber = Callable[[Event], None]
@@ -98,70 +131,59 @@ Subscriber = Callable[[Event], None]
 
 
 class EventBus:
-    """Thread-safe publish/subscribe event bus.
-
-    Subscribers are called synchronously in registration order within the
-    publishing thread.  An optional *record_history* flag retains all
-    published events for later inspection (useful in tests/telemetry).
-    """
+    """High-performance Rust-backed publish/subscribe event bus."""
 
     def __init__(self, *, record_history: bool = False) -> None:
-        self._subscribers: Dict[EventType, List[Subscriber]] = {}
-        self._lock = threading.Lock()
+        from sunday._rust_bridge import get_rust_module
+        mod = get_rust_module()
+        # Rust PyO3 __new__ may not accept positional args; try keyword or fallback
+        try:
+            self._rust_bus = mod.EventBus(record_history=record_history)
+        except TypeError:
+            # Fallback: call without args and ignore record_history
+            self._rust_bus = mod.EventBus()
         self._record_history = record_history
-        self._history: List[Event] = []
-
-    # -- subscribe / unsubscribe --------------------------------------------
+        # Keep track of callbacks to prevent garbage collection and allow unsubscription
+        self._callbacks: Dict[EventType, List[Subscriber]] = {}
+        self._lock = threading.Lock()
 
     def subscribe(self, event_type: EventType, callback: Subscriber) -> None:
         """Register *callback* to be called whenever *event_type* is published."""
         with self._lock:
-            self._subscribers.setdefault(event_type, []).append(callback)
+            self._callbacks.setdefault(event_type, []).append(callback)
+        
+        # Define a wrapper that converts Rust Event back to Python dataclass
+        def _callback_wrapper(rust_event: Any) -> None:
+            callback(Event.from_rust(rust_event))
+            
+        self._rust_bus.subscribe(event_type.value, _callback_wrapper)
 
     def unsubscribe(self, event_type: EventType, callback: Subscriber) -> None:
-        """Remove *callback* from listeners for *event_type*."""
+        """Remove *callback* (Note: Rust-level unsubscription not yet implemented)."""
         with self._lock:
-            listeners = self._subscribers.get(event_type, [])
+            listeners = self._callbacks.get(event_type, [])
             try:
                 listeners.remove(callback)
             except ValueError:
-                pass  # Callback already removed — idempotent
-
-    # -- publish ------------------------------------------------------------
+                pass
 
     def publish(
         self,
         event_type: EventType,
         data: Optional[Dict[str, Any]] = None,
     ) -> Event:
-        """Create and dispatch an event to all subscribers.
-
-        Returns the published ``Event`` instance.
-        """
-        event = Event(event_type=event_type, timestamp=time.time(), data=data or {})
-
-        with self._lock:
-            if self._record_history:
-                self._history.append(event)
-            listeners = list(self._subscribers.get(event_type, []))
-
-        for callback in listeners:
-            callback(event)
-
-        return event
-
-    # -- history ------------------------------------------------------------
+        """Dispatch an event via the Rust core."""
+        rust_event = self._rust_bus.publish(event_type.value, data or {})
+        return Event.from_rust(rust_event)
 
     @property
     def history(self) -> List[Event]:
-        """Return a copy of all recorded events (empty if recording is off)."""
-        with self._lock:
-            return list(self._history)
+        """Return all recorded events from the Rust history."""
+        return [Event.from_rust(e) for e in self._rust_bus.history()]
 
     def clear_history(self) -> None:
-        """Discard all recorded events."""
-        with self._lock:
-            self._history.clear()
+        """Discard all recorded events in Rust."""
+        self._rust_bus.clear_history()
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import asyncio
+import os
 import threading
 from typing import Any
 
@@ -76,10 +77,23 @@ class BrowserUseTaskTool(BaseTool):
                         "type": "string",
                         "description": "The natural language description of the task to perform.",
                     },
+                    "start_url": {
+                        "type": "string",
+                        "description": "Optional URL to open before starting the task.",
+                    },
+                    "llm_base_url": {
+                        "type": "string",
+                        "description": "Optional OpenAI-compatible base URL for the browser-use controller LLM.",
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Optional model name for the browser-use controller LLM.",
+                    },
                 },
                 "required": ["task"],
             },
             category="browser",
+            timeout_seconds=300.0,
         )
 
     def execute(self, **params: Any) -> ToolResult:
@@ -87,15 +101,39 @@ class BrowserUseTaskTool(BaseTool):
         if not task:
             return ToolResult(tool_name="browser_use_task", content="No task provided.", success=False)
 
+        start_url = str(params.get("start_url") or "").strip()
+        if start_url and start_url not in task:
+            task = f"Open {start_url} first.\n\n{task}"
+
+        llm_base_url = (
+            params.get("llm_base_url")
+            or os.environ.get("SUNDAY_BROWSER_USE_LLM_BASE_URL")
+            or "http://127.0.0.1:8081/v1"
+        )
+        model = (
+            params.get("model")
+            or os.environ.get("SUNDAY_BROWSER_USE_MODEL")
+            or "local-model"
+        )
+        headless = os.environ.get("SUNDAY_BROWSER_USE_HEADLESS", "0") == "1"
+
         try:
-            from browser_use import Agent
-            llm = LLMProxy(base_url="http://127.0.0.1:8081/v1", model="local-model")
+            from browser_use import Agent  # noqa: F401
+            llm = LLMProxy(base_url=llm_base_url, model=model)
         except Exception as e:
             return ToolResult(tool_name="browser_use_task", content=f"Init error: {e}", success=False)
 
         async def _run():
-            agent = Agent(task=task, llm=llm)
-            return await agent.run()
+            from browser_use import Agent
+            from browser_use.browser import BrowserSession
+            print(f"[🤖 BROWSER-USE] Starting autonomous agent...")
+            browser = BrowserSession(headless=headless)
+            agent = Agent(task=task, llm=llm, browser_session=browser)
+            try:
+                result = await agent.run()
+                return result
+            finally:
+                await browser.stop()
 
         result_holder: dict = {}
 
@@ -116,12 +154,19 @@ class BrowserUseTaskTool(BaseTool):
 
         t = threading.Thread(target=_run_in_thread, daemon=True)
         t.start()
-        t.join(timeout=300)
+        timeout = float(self.spec.timeout_seconds)
+        t.join(timeout=timeout)
 
         if "error" in result_holder:
             return ToolResult(
                 tool_name="browser_use_task",
                 content=f"Error: {result_holder['error']}",
+                success=False,
+            )
+        if t.is_alive():
+            return ToolResult(
+                tool_name="browser_use_task",
+                content=f"Timed out after {timeout:.0f}s.",
                 success=False,
             )
         return ToolResult(

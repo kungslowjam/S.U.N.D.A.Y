@@ -14,7 +14,7 @@ impl PyToolExecutor {
     #[new]
     fn new() -> Self {
         Self {
-            inner: Arc::new(sunday_tools::ToolExecutor::new(None, None)),
+            inner: Arc::new(sunday_tools::ToolExecutor::new(None, None, None)),
         }
     }
 
@@ -255,5 +255,180 @@ impl PyAXTreeProcessor {
         let root: serde_json::Value = serde_json::from_str(ax_tree_json)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         Ok(self.inner.process(&root))
+    }
+
+    #[pyo3(signature = (ax_tree_json, shm_name="sunday_ax_tree"))]
+    fn process_to_shm(&self, ax_tree_json: &str, shm_name: &str) -> PyResult<String> {
+        let root: serde_json::Value = serde_json::from_str(ax_tree_json)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        self.inner.process_to_shm(&root, shm_name)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
+    }
+
+    fn process_batch(&self, ax_tree_jsons: Vec<String>) -> PyResult<Vec<String>> {
+        use rayon::prelude::*;
+        ax_tree_jsons
+            .into_par_iter()
+            .map(|json_str| {
+                let root: serde_json::Value = serde_json::from_str(&json_str)
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+                Ok(self.inner.process(&root))
+            })
+            .collect()
+    }
+}
+
+#[pyclass(name = "NativeBrowser")]
+pub struct PyNativeBrowser {
+    inner: Arc<sunday_tools::browser_native::NativeBrowserSession>,
+}
+
+#[pymethods]
+impl PyNativeBrowser {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(sunday_tools::browser_native::NativeBrowserSession::new()),
+        }
+    }
+
+    #[pyo3(signature = (url, headless=false))]
+    fn goto(&self, url: String, headless: bool) -> PyResult<String> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let page = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            page.goto(url).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            Ok("Navigation successful".to_string())
+        })
+    }
+
+    #[pyo3(signature = (selector, headless=false))]
+    fn click(&self, selector: String, headless: bool) -> PyResult<String> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let page = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            page.find_element(&selector).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?
+                .click().await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            Ok("Click successful".to_string())
+        })
+    }
+
+    #[pyo3(signature = (selector, text, headless=false))]
+    fn fill(&self, selector: String, text: String, headless: bool) -> PyResult<String> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let page = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            page.find_element(&selector).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?
+                .type_str(text).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            Ok("Typing successful".to_string())
+        })
+    }
+
+    #[pyo3(signature = (headless=false))]
+    fn get_ax_tree(&self, headless: bool) -> PyResult<String> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let _ = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            
+            let tree = inner.get_ax_tree().await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            
+            Ok(serde_json::to_string(&tree).unwrap_or_default())
+        })
+    }
+
+    #[pyo3(signature = (headless=false))]
+    fn content(&self, headless: bool) -> PyResult<String> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let _ = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            let content = inner.get_content().await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            Ok(content)
+        })
+    }
+
+    #[pyo3(signature = (key, headless=false))]
+    fn press(&self, key: String, headless: bool) -> PyResult<()> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let _ = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            inner.press_key(&key).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    #[pyo3(signature = (x, y, headless=false))]
+    fn scroll(&self, x: i32, y: i32, headless: bool) -> PyResult<()> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let _ = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            inner.scroll(x, y).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    #[pyo3(signature = (headless=false))]
+    fn screenshot(&self, headless: bool) -> PyResult<String> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let _ = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            let b64 = inner.capture_screenshot_base64().await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            Ok(b64)
+        })
+    }
+
+    #[pyo3(signature = (buffer_name="sunday_browser_shot", headless=false))]
+    fn capture_screenshot_shared(&self, buffer_name: &str, headless: bool) -> PyResult<usize> {
+        let inner = self.inner.clone();
+        crate::RUNTIME.block_on(async move {
+            let _ = inner.ensure_page(headless).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            
+            let size = inner.capture_screenshot_shared(&buffer_name).await
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+            
+            Ok(size)
+        })
+    }
+
+    fn close(&self) -> PyResult<()> {
+        Ok(())
+    }
+}
+
+#[pyclass(name = "NativeMiner")]
+pub struct PyNativeMiner {
+    inner: sunday_mining::DOMMiner,
+}
+
+#[pymethods]
+impl PyNativeMiner {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: sunday_mining::DOMMiner::new(),
+        }
+    }
+
+    fn mine_html(&self, html: &str) -> PyResult<String> {
+        let nodes = self.inner.extract_tree(html);
+        Ok(self.inner.format_for_llm(&nodes))
     }
 }

@@ -8,12 +8,14 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from sunday._rust_bridge import RUST_AVAILABLE
+
 logger = logging.getLogger(__name__)
 
 _MAX_HISTORY_TURNS = 20
 
 
-class SessionStore:
+class _LegacySessionStore:
     """Manages per-sender, per-channel conversation sessions.
 
     Each session tracks conversation history, notification preferences,
@@ -175,3 +177,15 @@ class SessionStore:
 
     def close(self) -> None:
         self._db.close()
+
+
+def SessionStore(*args, **kwargs) -> Any:
+    """Factory that returns either RustSessionStore or LegacySessionStore."""
+    if RUST_AVAILABLE:
+        try:
+            from sunday.server.rust_session_store import RustSessionStore
+            return RustSessionStore(*args, **kwargs)
+        except Exception as exc:
+            logger.warning("Failed to initialize RustSessionStore, falling back: %s", exc)
+    
+    return _LegacySessionStore(*args, **kwargs)

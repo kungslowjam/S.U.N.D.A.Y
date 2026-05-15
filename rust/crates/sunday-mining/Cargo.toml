@@ -1,0 +1,18 @@
+[package]
+name = "sunday-mining"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+sunday-core = { path = "../sunday-core" }
+scraper = "0.22"
+html5ever = "0.29"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+rayon = { workspace = true }
+ego-tree = { workspace = true }
+pyo3 = { workspace = true, optional = true }
+
+[features]
+python = ["pyo3"]

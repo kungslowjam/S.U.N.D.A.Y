@@ -69,9 +69,42 @@ _LAZY_TOOLS = {
     "delegate_research": "sunday.tools.subagents",
     "scan_chunks": "sunday.tools.scan_chunks",
     "browser_axtree": "sunday.tools.browser_axtree",
+    "graphify": "sunday.tools.graphify_tool",
+    "create_tool_scaffold": "sunday.tools.scaffold_tool",
+    "system_health": "sunday.tools.system_health_tool",
+    "run_harness_test": "sunday.tools.harness_tool",
+    "e2e_browser_test": "sunday.tools.harness_tool",
+    "auto_self_test": "sunday.tools.harness_tool",
+    "list_tools": "sunday.tools.meta_tool",
+    "inspect_tool": "sunday.tools.meta_tool",
+    "reload_tools": "sunday.tools.meta_tool",
 }
 
 for key, mod in _LAZY_TOOLS.items():
     ToolRegistry.register_lazy(key, mod)
+
+def discover_tools() -> None:
+    """Scan the tools directory and register any new tools found."""
+    import os
+    from pathlib import Path
+    
+    tools_dir = Path(__file__).parent
+    for f in tools_dir.glob("*.py"):
+        if f.name.startswith("_") or f.name == "__init__.py":
+            continue
+        
+        # If the module isn't already handled by _LAZY_TOOLS, 
+        # register it lazily using the filename as the key.
+        # This ensures that even if we don't know the specific tool keys inside,
+        # importing the module will trigger their @ToolRegistry.register decorators.
+        mod_name = f"sunday.tools.{f.stem}"
+        if mod_name not in _LAZY_TOOLS.values():
+            # We use the stem as a 'trigger' key. 
+            # When the AI asks for 'my_tool', if it's not found, 
+            # we can have the registry try to load 'my_tool_tool.py'
+            ToolRegistry.register_lazy(f.stem, mod_name)
+
+# Run discovery on startup
+discover_tools()
 
 __all__ = ["BaseTool", "ToolExecutor", "ToolSpec"]

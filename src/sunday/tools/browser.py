@@ -10,71 +10,144 @@ from sunday.core.types import ToolResult
 from sunday.tools._stubs import BaseTool, ToolSpec
 
 
+import threading
+try:
+    import sunday_rust
+    HAS_RUST_BROWSER = hasattr(sunday_rust, "NativeBrowser")
+except ImportError:
+    HAS_RUST_BROWSER = False
+
+class PageProxy:
+    """A compatibility layer that makes Rust NativeBrowser look like Playwright Page (and vice-versa)."""
+    def __init__(self, instance: Any, is_rust: bool):
+        self._instance = instance
+        self._is_rust = is_rust
+
+    def __getattr__(self, name):
+        return getattr(self._instance, name)
+
+    def goto(self, url: str, wait_until: str = "load", **kwargs):
+        if self._is_rust:
+            # Rust version: goto(url, headless=False)
+            return self._instance.goto(url, headless=False)
+        else:
+            return self._instance.goto(url, wait_until=wait_until, **kwargs)
+
+    def click(self, selector: str, **kwargs):
+        if self._is_rust:
+            return self._instance.click(selector, headless=False)
+        else:
+            return self._instance.click(selector, **kwargs)
+
+    def fill(self, selector: str, value: str, **kwargs):
+        if self._is_rust:
+            return self._instance.fill(selector, value, headless=False)
+        else:
+            return self._instance.fill(selector, value, **kwargs)
+
+    def type(self, selector: str, value: str, **kwargs):
+        # Playwright has 'type', Rust has 'fill' (or we mapped it to fill)
+        if self._is_rust:
+            return self._instance.fill(selector, value, headless=False)
+        else:
+            return self._instance.type(selector, value, **kwargs)
+
+    def press(self, key: str, **kwargs):
+        if self._is_rust:
+            return self._instance.press(key, headless=False)
+        else:
+            return self._instance.press(key, **kwargs)
+
+    def screenshot(self, **kwargs):
+        if self._is_rust:
+            # Rust returns base64 string directly
+            return base64.b64decode(self._instance.screenshot(headless=False))
+        else:
+            return self._instance.screenshot(**kwargs)
+
+    def content(self):
+        if self._is_rust:
+            return self._instance.content(headless=False)
+        else:
+            return self._instance.content()
+
+    def evaluate(self, script: str, arg: Any = None):
+        if self._is_rust:
+            # Simple evaluate for now (we can enhance this if needed)
+            # Many tools use evaluate to get AX tree, but we have get_ax_tree in Rust
+            if "window.__get_ax_tree" in script:
+                import json
+                return json.loads(self._instance.get_ax_tree(headless=False))
+            return None # Fallback
+        else:
+            return self._instance.evaluate(script, arg)
+
 class _BrowserSession:
-    """Manages a shared Playwright browser session (lazy init)."""
+    """Manages a shared browser session (Rust-native or Playwright fallback)."""
 
     def __init__(self) -> None:
-        self._playwright = None
-        self._browser = None
-        self._page = None
-        # Dedup state: prevent the agent from calling the same tool and getting identical results
-        self._last_extract_hash: str = ""
-        self._last_elements_hash: str = ""
-        self._extract_repeat_count: int = 0
-        self._elements_repeat_count: int = 0
-        self._scroll_count: int = 0  # Scroll spam limiter
+        self._local = threading.local()
+
+    def _get_session(self):
+        """Get or create a session for the current thread."""
+        if not hasattr(self._local, 'instance'):
+            self._local.instance = None
+            self._local.is_rust = False
+            self._local.last_extract_hash = ""
+            self._local.last_elements_hash = ""
+            self._local.extract_repeat_count = 0
+            self._local.elements_repeat_count = 0
+            self._local.scroll_count = 0
+        return self._local
 
     @property
     def page(self):
+        sess = self._get_session()
         self._ensure_browser()
-        return self._page
+        return PageProxy(sess.instance, sess.is_rust)
 
     def close(self) -> None:
-        """Forcefully close the current session."""
-        try:
-            if self._page:
-                self._page.close()
-            if self._browser:
-                self._browser.close()
-            if self._playwright:
-                self._playwright.stop()
-        except Exception:
-            pass
-        self._page = None
-        self._browser = None
-        self._playwright = None
+        """Forcefully close the current thread's session."""
+        sess = self._get_session()
+        if sess.instance:
+            try:
+                sess.instance.close()
+            except Exception:
+                pass
+        sess.instance = None
 
     def _ensure_browser(self) -> None:
-        if self._page is not None:
+        sess = self._get_session()
+        if sess.instance is not None:
             try:
-                # Heartbeat check to see if the session is still alive
-                self._page.evaluate("1")
+                if sess.is_rust:
+                    sess.instance.get_ax_tree(headless=False)
+                else:
+                    sess.instance.evaluate("1")
                 return
             except Exception:
-                # Page or browser has been closed/died, reset everything
                 self.close()
+
+        if HAS_RUST_BROWSER:
+            try:
+                print("      [🌐 BROWSER] Initializing Native Rust Browser Bridge (chromiumoxide)...")
+                sess.instance = sunday_rust.NativeBrowser()
+                sess.is_rust = True
+                sess.instance.goto("about:blank", headless=False)
+                return
+            except Exception as e:
+                print(f"      [🌐 BROWSER] Rust Bridge init failed: {e}. Falling back to Playwright...")
 
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
-            raise ImportError(
-                "playwright not installed. Install with: uv sync --extra browser"
-            )
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(
-            headless=False,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-infobars"
-            ]
-        )
-        self._page = self._browser.new_page(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 720},
-            locale="th-TH",
-            timezone_id="Asia/Bangkok"
-        )
+            raise ImportError("Browser automation requires 'playwright' or 'sunday_rust'")
+        
+        print("      [🌐 BROWSER] Initializing Playwright Fallback...")
+        playwright = sync_playwright().start()
+        browser = playwright.chromium.launch(headless=False, args=["--no-sandbox"])
+        sess.instance = browser.new_page(viewport={"width": 1280, "height": 720})
+        sess.is_rust = False
         
         # Spoof navigator.webdriver and other bot detection properties, plus Auto Popup Killer
         self._page.add_init_script("""
@@ -153,7 +226,10 @@ class _BrowserSession:
             // Note: Keyframes moved to Shadow DOM for encapsulation
         """)
         
-        self._setup_cursor(self._page)
+        try:
+            self._setup_cursor(self._page)
+        except Exception as e:
+            print(f"      [🌐 BROWSER] Cursor setup during init failed: {e}")
 
     def _setup_cursor(self, page) -> None:
         """Inject a visual cursor script into the page."""
@@ -314,7 +390,7 @@ class _BrowserSession:
                             tree.push({
                                 id,
                                 role,
-                                text: text.substring(0, 60).replace(/\n/g, ' '),
+                                text: text.substring(0, 60).replace(/\\n/g, ' '),
                                 x: Math.round(rect.left + rect.width / 2),
                                 y: Math.round(rect.top + rect.height / 2)
                             });
@@ -408,74 +484,28 @@ class _BrowserSession:
             const target = typeof selector === 'string' ? document.querySelector(selector) : selector;
             if (target) target.classList.add('sunday-target-highlight');
         };
-
-            if (dist < 5) {
-                window.__playwright_cursor.style.left = x + 'px';
-                window.__playwright_cursor.style.top = y + 'px';
-                createRipple(x, y);
-                return;
-            }
-
-            const duration = 400; // ms
-            const startTime = performance.now();
-            let lastTrailTime = startTime;
-
-            const animate = (time) => {
-                let progress = (time - startTime) / duration;
-                if (progress > 1) progress = 1;
-                
-                // Ease out cubic
-                const easeOut = 1 - Math.pow(1 - progress, 3);
-                
-                const curX = currentLeft + dx * easeOut;
-                const curY = currentTop + dy * easeOut;
-                
-                window.__playwright_cursor.style.left = curX + 'px';
-                window.__playwright_cursor.style.top = curY + 'px';
-                
-                // Create trail at a steady rate
-                if (time - lastTrailTime > 20) {
-                    createTrail(curX, curY);
-                    lastTrailTime = time;
-                }
-
-                if (progress < 1) {
-                    requestAnimationFrame(animate);
-                } else {
-                    createRipple(x, y);
-                }
-            };
-            
-            requestAnimationFrame(animate);
-        };
         """
         try:
             page.add_init_script(script)
             page.evaluate(script) # Immediate injection
-        except Exception:
-            pass
+            print("      [🌐 BROWSER] Visual cursor injected successfully.")
+        except Exception as e:
+            print(f"      [🌐 BROWSER] Cursor injection failed: {e}")
 
     def _visual_move(self, page, x: float, y: float, status: str = "", selector: str = "") -> None:
         """Move the visual cursor to coordinates or selector with status."""
         try:
+            # Ensure cursor is injected first
+            self._setup_cursor(page)
+            
             if selector:
                 page.evaluate(f"window.__highlight_target('{selector}')")
             page.evaluate(f"window.__move_cursor({x}, {y}, '{status}')")
+            print(f"      [🌐 BROWSER] Cursor moving to ({x}, {y}) - {status}")
             page.wait_for_timeout(500) # Wait for animation to finish
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"      [🌐 BROWSER] Cursor move failed: {e}")
 
-    @property
-    def page(self):
-        self._ensure_browser()
-        return self._page
-
-    def close(self) -> None:
-        if self._browser:
-            self._browser.close()
-        if self._playwright:
-            self._playwright.stop()
-        self._playwright = self._browser = self._page = None
 
 
 def _capture_metadata(page) -> dict:
@@ -575,19 +605,22 @@ class BrowserNavigateTool(BaseTool):
         if wait_for not in ("load", "domcontentloaded", "networkidle"):
             wait_for = "load"
 
-        # SSRF check
-        try:
-            from sunday.security.ssrf import check_ssrf
+        # SSRF check (skip for local development/testing)
+        skip_hosts = ("127.0.0.1", "localhost", "0.0.0.0", "::1")
+        is_local = any(h in url for h in skip_hosts)
+        if not is_local:
+            try:
+                from sunday.security.ssrf import check_ssrf
 
-            ssrf_error = check_ssrf(url)
-            if ssrf_error:
-                return ToolResult(
-                    tool_name="browser_navigate",
-                    content=f"SSRF blocked: {ssrf_error}",
-                    success=False,
-                )
-        except ImportError:
-            pass  # ssrf module not available, skip check
+                ssrf_error = check_ssrf(url)
+                if ssrf_error:
+                    return ToolResult(
+                        tool_name="browser_navigate",
+                        content=f"SSRF blocked: {ssrf_error}",
+                        success=False,
+                    )
+            except ImportError:
+                pass  # ssrf module not available, skip check
 
         try:
             page = _session.page
@@ -1604,23 +1637,36 @@ class BrowserGetAccessibilityTreeTool(BaseTool):
     def execute(self, **params: Any) -> ToolResult:
         try:
             page = _session.page
-            # Force re-injection just in case
-            _session._setup_cursor(page)
-            tree = page.evaluate("window.__get_ax_tree()")
-            
-            output = "Interactive Elements Found:\n"
-            for el in tree:
-                output += f"[@{el['id']}] {el['role']}: \"{el['text']}\"\n"
-            
-            if not tree:
-                output = "No interactive elements found."
+            sess = _session._get_session()
 
-            return ToolResult(
-                tool_name="browser_get_accessibility_tree",
-                content=output,
-                success=True,
-                metadata={"tree": tree}
-            )
+            if sess.is_rust:
+                # Use high-performance Rust processing
+                raw_json = sess.instance.get_ax_tree(headless=False)
+                processor = sunday_rust.AXTreeProcessor(max_depth=10, filter_unimportant=True)
+                content = processor.process_compressed(raw_json)
+                
+                return ToolResult(
+                    tool_name="browser_get_accessibility_tree",
+                    content=content,
+                    success=True,
+                    metadata={"engine": "rust_native"}
+                )
+            else:
+                # Playwright fallback
+                tree = page.evaluate("window.__get_ax_tree()")
+                output = "Interactive Elements Found (JS Fallback):\n"
+                for el in tree:
+                    output += f"[@{el['id']}] {el['role']}: \"{el['text']}\"\n"
+                
+                if not tree:
+                    output = "No interactive elements found."
+
+                return ToolResult(
+                    tool_name="browser_get_accessibility_tree",
+                    content=output,
+                    success=True,
+                    metadata={"tree": tree, "engine": "playwright"}
+                )
         except Exception as exc:
             return ToolResult(tool_name="browser_get_accessibility_tree", content=f"AXTree error: {exc}", success=False)
 

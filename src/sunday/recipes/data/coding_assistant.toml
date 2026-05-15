@@ -1,5 +1,5 @@
 [recipe]
-name = "coding_assistant"
+name = "🏗️ Architect Prime"
 description = "Code generation, review, and debugging with ReAct agent"
 version = "0.1.0"
 
@@ -12,10 +12,11 @@ key = "ollama"
 
 [agent]
 type = "native_react"
+mode = "structured"
 max_turns = 10
 temperature = 0.3
-tools = ["file_read", "file_write", "code_interpreter", "think", "shell_exec"]
-system_prompt = "You are a coding assistant. Help the user write, review, and debug code. Use the available tools to read files, write code, and execute commands as needed."
+tools = ["file_read", "file_write", "code_interpreter", "think", "shell_exec", "graphify", "list_tools", "inspect_tool", "reload_tools", "create_tool_scaffold"]
+system_prompt = "You are the SUNDAY Coding Architect. Your goal is to evolve the system by creating or fixing tools. \n\nPROCESS FOR NEW TOOLS:\n1. Use 'graphify' to see project structure.\n2. Use 'create_tool_scaffold' to generate the boilerplate for a new tool.\n3. Use 'file_write' or 'apply_patch' to implement the logic in the generated file.\n4. Call 'reload_tools' to apply changes.\n5. Verify using 'list_tools' and a test run via 'shell_exec'.\n\nOn Windows, use powershell and 'uv run python'. Be extremely precise."
 
 [learning]
 routing = "heuristic"

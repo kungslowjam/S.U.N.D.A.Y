@@ -6,15 +6,18 @@
 pub mod config;
 pub mod error;
 pub mod events;
+pub mod shared_mem;
 pub mod hardware;
 pub mod model_catalog;
 pub mod registry;
-pub mod tokenizer;
 pub mod types;
+pub mod tokenizer;
 
 pub use config::{load_config, JarvisConfig};
-pub use error::SUNDAYError;
-pub use events::{Event, EventBus, EventType};
+pub use error::{SUNDAYError, EngineError};
+pub use events::{Event, EventBus, EventType, GLOBAL_BUS, emit_event};
+pub use shared_mem::SharedMemorySegment;
 pub use model_catalog::{merge_discovered_models, register_builtin_models, BUILTIN_MODELS};
 pub use registry::TypedRegistry;
 pub use types::*;
+pub use tokenizer::*;

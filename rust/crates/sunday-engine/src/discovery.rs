@@ -102,6 +102,15 @@ pub fn get_engine_static(
         "apple_fm" => Ok(Engine::AppleFm(OpenAICompatEngine::apple_fm(
             &config.engine.apple_fm.host,
         ))),
+        "native" => {
+            let model_path = &config.intelligence.model_path;
+            if model_path.is_empty() {
+                return Err(SUNDAYError::Config(sunday_core::error::ConfigError::InvalidValue(
+                    "intelligence.model_path is required for native engine".into(),
+                )));
+            }
+            Ok(Engine::Native(crate::native::NativeLlamaEngine::new(model_path)?))
+        }
         other => Err(SUNDAYError::Engine(
             sunday_core::error::EngineError::ModelNotFound(format!(
                 "Unknown engine: {}",

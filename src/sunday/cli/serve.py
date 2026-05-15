@@ -87,39 +87,39 @@ def serve(
         except Exception as exc:
             logger.debug("Telemetry store init failed: %s", exc)
 
-    # Discover all healthy engines
-    all_engines = discover_engines(config)
-    if not all_engines:
-        console.print(
-            "[red bold]No inference engine available.[/red bold]\n\n"
-            "Make sure an engine is running (e.g., llama-server on 8081 or Ollama)."
-        )
+    # Discover or resolve engine
+    from sunday.engine.multi import MultiEngine
+    active_engines = []
+    engine_name = engine_key or "multi"
+
+    if engine_key and engine_key != "multi":
+        # Specific engine requested, try to get it directly
+        try:
+            eng = get_engine(engine_key, config)
+            if eng:
+                active_engines.append((engine_key, eng))
+        except Exception as exc:
+            logger.debug("Failed to get specific engine '%s': %s", engine_key, exc)
+
+    if not active_engines:
+        # Fallback to discovery
+        all_engines = discover_engines(config)
+        for ek, eng in all_engines:
+            active_engines.append((ek, eng))
+        
+        # Ensure llamacpp is at least attempted if everything else fails
+        if not any(ek == "llamacpp" for ek, _ in active_engines):
+            try:
+                from sunday.engine.openai_compat_engines import LlamaCppEngine
+                host = getattr(config.engine, "llamacpp_host", "http://127.0.0.1:8081")
+                active_engines.append(("llamacpp", LlamaCppEngine(host=host)))
+            except Exception:
+                pass
+
+    if not active_engines:
+        console.print("[red bold]No inference engine available.[/red bold]")
         sys.exit(1)
 
-    from sunday.engine.multi import MultiEngine
-
-    active_engines = []
-    engine_name = "multi"
-
-    # Add discovered local engines
-    found_llamacpp = False
-    for ek, eng in all_engines:
-        active_engines.append((ek, eng))
-        if ek == "llamacpp":
-            found_llamacpp = True
-
-    # CRITICAL: Force include LlamaCppEngine if missing
-    if not found_llamacpp:
-        try:
-            from sunday.engine.openai_compat_engines import LlamaCppEngine
-            # Use the default host from config if available
-            host = getattr(config.engine, "llamacpp_host", "http://localhost:8081")
-            active_engines.append(("llamacpp", LlamaCppEngine(host=host)))
-            console.print("  Engine: [cyan]llamacpp[/cyan] (forced registration)")
-        except Exception as exc:
-            logger.debug("Failed to force register llamacpp: %s", exc)
-
-    # Wrap with MultiEngine to support dynamic routing across all backends
     engine = MultiEngine(active_engines)
 
     # Apply security guardrails

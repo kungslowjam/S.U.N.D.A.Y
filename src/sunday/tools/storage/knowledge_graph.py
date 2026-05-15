@@ -55,15 +55,19 @@ class KnowledgeGraphMemory:
 
     def __init__(
         self,
-        db_path: Union[str, Path] = DEFAULT_CONFIG_DIR / "knowledge_graph.db",
+        db_path: Union[str, Path] = "",
         **kwargs: Any,
     ) -> None:
+        if not db_path:
+            db_path = DEFAULT_CONFIG_DIR / "knowledge_graph_v2.db"
         self._db_path = Path(db_path)
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-        self._create_tables()
+        
+        from sunday._rust_bridge import get_rust_module
+        _rust = get_rust_module()
+        self._rust_impl = _rust.KnowledgeGraphMemory(str(self._db_path))
 
     def _create_tables(self) -> None:
+        pass
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS entities (
                 entity_id   TEXT PRIMARY KEY,

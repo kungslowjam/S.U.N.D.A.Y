@@ -34,10 +34,14 @@ class OllamaEngine(InferenceEngine):
     def __init__(
         self,
         host: str | None = None,
+        base_url: str | None = None,
         *,
         timeout: float = 1800.0,
     ) -> None:
-        # Priority: explicit host (from config.toml) > OLLAMA_HOST env var > default
+        # Priority: explicit host > base_url > OLLAMA_HOST env var > default
+        if host is None:
+            host = base_url
+        
         if host is None:
             env_host = os.environ.get("OLLAMA_HOST")
             host = env_host or self._DEFAULT_HOST

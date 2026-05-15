@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -44,9 +45,35 @@ class StepType(str, Enum):
     RESPOND = "respond"
 
 
+class GoalStatus(str, Enum):
+    """Status of a long-running persistent goal."""
+
+    ACTIVE = "active"
+    PAUSED = "paused"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    VERIFYING = "verifying"
+    BUDGET_LIMITED = "budget_limited"
+
+
 # ---------------------------------------------------------------------------
 # Message types
 # ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class Goal:
+    """A persistent objective for a long-running task."""
+
+    id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    objective: str = ""
+    status: GoalStatus = GoalStatus.ACTIVE
+    tokens_used: int = 0
+    token_budget: Optional[int] = None
+    time_used_seconds: float = 0.0
+    created_at: float = field(default_factory=time.time)
+    updated_at: float = field(default_factory=time.time)
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -266,6 +293,8 @@ class RoutingContext:
 
 __all__ = [
     "Conversation",
+    "Goal",
+    "GoalStatus",
     "Message",
     "ModelSpec",
     "Quantization",

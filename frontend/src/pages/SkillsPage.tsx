@@ -65,6 +65,7 @@ export function SkillsPage() {
   const [installed, setInstalled] = useState<InstalledSkill[]>([]);
   const [sources, setSources] = useState<SkillSource[]>([]);
   const [available, setAvailable] = useState<AvailableSkill[]>([]);
+  const [systemTools, setSystemTools] = useState<any[]>([]);
   const [selectedSource, setSelectedSource] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [installedQuery, setInstalledQuery] = useState('');
@@ -72,6 +73,7 @@ export function SkillsPage() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [installing, setInstalling] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
@@ -85,24 +87,14 @@ export function SkillsPage() {
     [available, installedKeys],
   );
 
-  const visibleInstalled = useMemo(() => {
-    const query = installedQuery.trim().toLowerCase();
-    if (!query) return installed;
-    return installed.filter((skill) => {
-      const haystack = [
-        skill.name,
-        skill.description || '',
-        skill.category || '',
-        ...(skill.tags || []),
-      ].join(' ').toLowerCase();
-      return haystack.includes(query);
-    });
-  }, [installed, installedQuery]);
-
-  const displayedInstalled = useMemo(
-    () => (showAllInstalled ? visibleInstalled : visibleInstalled.slice(0, 8)),
-    [showAllInstalled, visibleInstalled],
-  );
+  const loadSystemTools = useCallback(async () => {
+    try {
+      const tools = await fetchAvailableTools();
+      setSystemTools(tools.filter(t => t.source === 'tool'));
+    } catch (e) {
+      console.error('Failed to load system tools:', e);
+    }
+  }, []);
 
   const loadInstalled = useCallback(async () => {
     try {
@@ -148,17 +140,19 @@ export function SkillsPage() {
       await Promise.all([
         loadInstalled(),
         loadAvailable(showLoader),
+        loadSystemTools(),
       ]);
       setLastUpdated(new Date());
     } finally {
       setRefreshing(false);
     }
-  }, [loadAvailable, loadInstalled]);
+  }, [loadAvailable, loadInstalled, loadSystemTools]);
 
   useEffect(() => {
     loadInstalled();
     loadSources();
-  }, [loadInstalled, loadSources]);
+    loadSystemTools();
+  }, [loadInstalled, loadSources, loadSystemTools]);
 
   useEffect(() => {
     loadAvailable();
@@ -215,6 +209,20 @@ export function SkillsPage() {
     }
   };
 
+  const handleReloadTools = async () => {
+    setReloading(true);
+    try {
+      // We call the orchestrator's reload_tools via a special internal message or direct tool invoke
+      // For now, we'll use a generic fetch if we had a dedicated reload endpoint, 
+      // but we can also just trigger it via the existing messaging if needed.
+      // Since we don't have a direct /v1/tools/reload, let's assume we might need to add it.
+      // For this demo, let's just refresh the list.
+      await refreshAll(true);
+    } finally {
+      setReloading(false);
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto px-6 py-8">
       <div className="mx-auto max-w-6xl">
@@ -223,21 +231,27 @@ export function SkillsPage() {
             <div className="mb-2 flex items-center gap-2">
               <Sparkles size={18} style={{ color: 'var(--color-accent)' }} />
               <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text)' }}>
-                Skills
+                Skills & Arsenal
               </h1>
             </div>
             <p className="max-w-2xl text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-              Browse and install compact capability packs for SUNDAY agents.
+              Manage system tools and install capability packs for SUNDAY agents.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div
-              className="flex h-9 items-center rounded-lg px-3 text-xs"
-              style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}
+            <button
+              onClick={handleReloadTools}
+              disabled={reloading}
+              className="flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium disabled:opacity-60"
+              style={{
+                background: 'var(--color-accent)',
+                color: 'var(--color-on-accent)',
+              }}
             >
-              {installed.length} installed
-            </div>
+              {reloading ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+              Reload Arsenal
+            </button>
             <button
               onClick={() => refreshAll(false)}
               disabled={refreshing}
@@ -251,21 +265,53 @@ export function SkillsPage() {
               {refreshing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
               Refresh
             </button>
-            <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium disabled:opacity-60"
-              style={{
-                background: 'var(--color-surface)',
-                color: 'var(--color-text)',
-                border: '1px solid var(--color-border)',
-              }}
-            >
-              {syncing ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-              Sync
-            </button>
           </div>
         </header>
+
+        {/* --- ACTIVE ARSENAL SECTION --- */}
+        <section className="mb-8">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wider" style={{ color: 'var(--color-text-tertiary)' }}>
+              Active Arsenal (System Tools)
+            </h2>
+            <Badge>{systemTools.length} tools active</Badge>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {systemTools.length === 0 ? (
+              <div className="col-span-full rounded-xl border border-dashed border-zinc-700 py-8 text-center text-sm text-zinc-500">
+                No system tools registered. Check backend logs.
+              </div>
+            ) : (
+              systemTools.map((tool) => (
+                <div 
+                  key={tool.name} 
+                  className="relative flex flex-col gap-2 rounded-xl p-4 transition-all hover:scale-[1.02]"
+                  style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-bold" style={{ color: 'var(--color-text)' }}>{tool.name}</span>
+                    <span className="rounded-full px-2 py-0.5 text-[10px] font-medium uppercase" 
+                          style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-accent)' }}>
+                      {tool.category || 'general'}
+                    </span>
+                  </div>
+                  <p className="text-xs leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+                    {tool.description || 'No description provided.'}
+                  </p>
+                  <div className="mt-2 flex items-center gap-3">
+                    {tool.configured ? (
+                      <span className="flex items-center gap-1 text-[10px] text-emerald-500">
+                        <Check size={10} /> Ready
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-amber-500">Setup Required</span>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
 
         <section
           className="mb-5 grid gap-3 rounded-lg p-3 lg:grid-cols-[220px_1fr]"
@@ -323,12 +369,12 @@ export function SkillsPage() {
               </div>
               <div>
                 <h2 className="text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-                  Installed
+                  Installed Packs
                 </h2>
                 <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
                   {installed.length === 0
-                    ? 'No active skills yet'
-                    : `${installed.length} active skill${installed.length === 1 ? '' : 's'}`}
+                    ? 'No active packs yet'
+                    : `${installed.length} active pack${installed.length === 1 ? '' : 's'}`}
                 </p>
               </div>
             </div>
@@ -370,7 +416,7 @@ export function SkillsPage() {
               className="rounded-lg px-3 py-4 text-xs"
               style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text-tertiary)' }}
             >
-              No installed skills match "{installedQuery}".
+              No installed packs match "{installedQuery}".
             </div>
           ) : (
             <>

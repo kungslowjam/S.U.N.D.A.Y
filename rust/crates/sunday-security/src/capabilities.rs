@@ -161,6 +161,33 @@ impl Default for CapabilityPolicy {
     }
 }
 
+/// Helper to ensure files stay within project boundaries.
+pub struct PathGuard {
+    allowed_roots: Vec<std::path::PathBuf>,
+}
+
+impl PathGuard {
+    pub fn new(roots: Vec<std::path::PathBuf>) -> Self {
+        Self { allowed_roots: roots }
+    }
+
+    pub fn is_safe(&self, path: &std::path::Path) -> bool {
+        let canonical_path = match path.canonicalize() {
+            Ok(p) => p,
+            Err(_) => return false, // If path doesn't exist or is invalid, treat as unsafe
+        };
+
+        for root in &self.allowed_roots {
+            if let Ok(canonical_root) = root.canonicalize() {
+                if canonical_path.starts_with(canonical_root) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+}
+
 fn glob_match(pattern: &str, text: &str) -> bool {
     if pattern == "*" {
         return true;

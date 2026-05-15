@@ -90,7 +90,7 @@ pub struct LlamaCppEngineConfig {
 }
 
 fn default_llamacpp_host() -> String {
-    "http://localhost:8080".into()
+    "http://localhost:8081".into()
 }
 
 impl Default for LlamaCppEngineConfig {
@@ -234,7 +234,7 @@ pub struct EngineConfig {
 }
 
 fn default_engine_name() -> String {
-    "ollama".into()
+    "llamacpp".into()
 }
 
 impl Default for EngineConfig {
@@ -299,8 +299,8 @@ fn default_repetition_penalty() -> f64 { 1.0 }
 impl Default for IntelligenceConfig {
     fn default() -> Self {
         Self {
-            default_model: String::new(),
-            fallback_model: String::new(),
+            default_model: "qwen3.5:latest".into(),
+            fallback_model: "qwen3.5:latest".into(),
             model_path: String::new(),
             checkpoint_path: String::new(),
             quantization: default_quantization_str(),
@@ -921,6 +921,8 @@ pub struct JarvisConfig {
     pub a2a: A2AConfig,
     #[serde(default)]
     pub operators: OperatorsConfig,
+    #[serde(flatten)]
+    pub extra: std::collections::HashMap<String, serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------

@@ -289,7 +289,7 @@ function DesktopView() {
           <span className="text-sm font-medium">All systems running</span>
         </div>
         <p className="text-xs mb-5" style={{ color: 'var(--color-text-tertiary)' }}>
-          Ollama inference engine, API server, and AI model are active.
+          llama.cpp inference engine, API server, and AI model are active.
         </p>
         <button
           onClick={() => navigate('/')}
@@ -366,7 +366,7 @@ function SelfHostedView() {
             </h2>
           </div>
           <p className="text-xs mb-6" style={{ color: 'var(--color-text-tertiary)' }}>
-            One-click install. Bundles Ollama and the server &mdash; no setup required.
+            One-click install. Bundles the inference engine and the server &mdash; no setup required.
           </p>
 
           <a
@@ -430,7 +430,7 @@ function SelfHostedView() {
           </p>
           <CodeBlock code={"git clone https://github.com/open-sunday/SUNDAY.git\ncd SUNDAY\ndocker compose -f deploy/docker/docker-compose.yml up -d"} />
           <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-            This starts both the API server and Ollama. The web UI is bundled and
+            This starts both the API server and llama.cpp. The web UI is bundled and
             served automatically at port 8000.
           </p>
         </Section>
@@ -454,7 +454,7 @@ function SelfHostedView() {
           </div>
           <div>
             <div className="font-medium mb-0.5" style={{ color: 'var(--color-text)' }}>CLI / Self-Hosted</div>
-            Python 3.10+ and an inference engine (Ollama recommended)
+            Python 3.10+ and an inference engine (llama.cpp recommended)
           </div>
           <div>
             <div className="font-medium mb-0.5" style={{ color: 'var(--color-text)' }}>Memory</div>

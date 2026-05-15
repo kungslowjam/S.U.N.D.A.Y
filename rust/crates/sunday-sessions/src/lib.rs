@@ -286,6 +286,36 @@ impl SessionStore {
         );
     }
 
+    /// Set a metadata key-value pair for a session.
+    pub fn set_metadata_key(
+        &self,
+        session_id: &str,
+        key: &str,
+        value: serde_json::Value,
+    ) -> Result<(), String> {
+        let metadata_json: String = self
+            .conn
+            .query_row(
+                "SELECT metadata_json FROM sessions WHERE session_id = ?1",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+
+        let mut metadata: HashMap<String, serde_json::Value> =
+            serde_json::from_str(&metadata_json).unwrap_or_default();
+        metadata.insert(key.to_string(), value);
+        let new_json = serde_json::to_string(&metadata).map_err(|e| e.to_string())?;
+
+        self.conn
+            .execute(
+                "UPDATE sessions SET metadata_json = ?1 WHERE session_id = ?2",
+                params![new_json, session_id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// List sessions, optionally filtering to only those with recent activity.
     pub fn list_sessions(&self, active_only: bool, limit: usize) -> Vec<Session> {
         let query = if active_only {

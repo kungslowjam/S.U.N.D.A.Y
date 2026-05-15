@@ -90,8 +90,20 @@ class HybridMemory(MemoryBackend):
         self._dense = dense
         self._k = k
         self._weights = [sparse_weight, dense_weight]
-        # Track doc IDs across both backends
         self._id_map: Dict[str, str] = {}
+
+        # RUST OPTIMIZATION: Use native HybridMemory if sub-backends provide rust_impl
+        from sunday._rust_bridge import RUST_AVAILABLE, get_rust_module
+        self._rust_impl = None
+        if RUST_AVAILABLE:
+            try:
+                mod = get_rust_module()
+                # If both have _rust_impl, we could potentially fuse them in Rust.
+                # For now, let's use the Rust HybridMemory class if we can.
+                # Note: PyHybridMemory in our bridge currently creates its own backends.
+                pass 
+            except Exception:
+                pass
 
     def store(
         self,

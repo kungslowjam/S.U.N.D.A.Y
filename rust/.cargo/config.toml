@@ -1,0 +1,7 @@
+[env]
+PYO3_PYTHON = "C:\\Users\\hello\\Desktop\\Project_me\\SUNDAY\\.venv\\Scripts\\python.exe"
+
+# Fix Windows C runtime conflict between esaxx_rs (/MT) and ort_sys (/MD)
+# Force all crates to use dynamic C runtime (/MD)
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=-crt-static"]

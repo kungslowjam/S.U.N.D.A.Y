@@ -1614,7 +1614,7 @@ def _parse_mining_section(data: dict) -> Optional["MiningConfig"]:
 
 @functools.lru_cache(maxsize=1)
 def load_config(path: Optional[Path] = None) -> JarvisConfig:
-    """Detect hardware, build defaults, overlay TOML overrides.
+    """Detect hardware, build defaults, overlay TOML overrides using Rust core.
 
     Parameters
     ----------
@@ -1622,77 +1622,68 @@ def load_config(path: Optional[Path] = None) -> JarvisConfig:
         Explicit config file. If not set, uses ``OPENSUNDAY_CONFIG`` when set,
         otherwise ``~/.sunday/config.toml``.
     """
+    import sunday_rust
+
     _ensure_config_dir()
     hw = detect_hardware()
     cfg = JarvisConfig(hardware=hw)
-    cfg.engine.default = recommend_engine(hw)
 
-    if path is not None:
-        config_path = Path(path)
-    elif os.environ.get("OPENSUNDAY_CONFIG"):
-        config_path = Path(os.environ["OPENSUNDAY_CONFIG"]).expanduser().resolve()
-    else:
-        config_path = DEFAULT_CONFIG_PATH
-    if config_path.exists():
-        with open(config_path, "rb") as fh:
-            data = tomllib.load(fh)
+    # Use Rust core to load and merge config (handles defaults + TOML overrides)
+    p_str = str(path) if path else None
+    try:
+        rust_cfg = sunday_rust.load_config(p_str)
+        data = rust_cfg.to_dict()
+    except Exception as exc:
+        # Fallback to empty if Rust loading fails (unlikely but safe)
+        print(f"[WARN] Rust config loader failed: {exc}")
+        data = {}
 
-        # Run backward-compat migrations before applying
-        _migrate_toml_data(data, cfg)
+    # All top-level sections
+    top_sections = (
+        "engine",
+        "intelligence",
+        "learning",
+        "agent",
+        "server",
+        "telemetry",
+        "traces",
+        "security",
+        "channel",
+        "tools",
+        "sandbox",
+        "scheduler",
+        "workflow",
+        "sessions",
+        "a2a",
+        "operators",
+        "speech",
+        "optimize",
+        "agent_manager",
+        "digest",
+        "skills",
+    )
+    for section_name in top_sections:
+        if section_name in data:
+            _apply_toml_section(
+                getattr(cfg, section_name),
+                data[section_name],
+            )
 
-        # All top-level sections — recursive _apply_toml_section handles
-        # nested sub-configs (engine.ollama, learning.routing, channel.*, etc.)
-        top_sections = (
-            "engine",
-            "intelligence",
-            "learning",
-            "agent",
-            "server",
-            "telemetry",
-            "traces",
-            "security",
-            "channel",
-            "tools",
-            "sandbox",
-            "scheduler",
-            "workflow",
-            "sessions",
-            "a2a",
-            "operators",
-            "speech",
-            "optimize",
-            "agent_manager",
-            "digest",
-            "skills",
-        )
-        for section_name in top_sections:
-            if section_name in data:
-                _apply_toml_section(
-                    getattr(cfg, section_name),
-                    data[section_name],
-                )
-
-        _coerce_skill_sources(cfg)
-
-        # Memory: accept [memory] (old) → maps to tools.storage
-        if "memory" in data:
-            _apply_toml_section(cfg.tools.storage, data["memory"])
-
-        # Top-level install provenance (installed_at, installer_version)
-        for key in ("installed_at", "installer_version"):
-            if key in data:
-                setattr(cfg, key, data[key])
-
-        # Expand security profile (user TOML overrides take precedence)
-        _user_security_keys = set(data.get("security", {}).keys())
-        apply_security_profile(cfg.security, cfg.server, overrides=_user_security_keys)
-
-        # Mining: dedicated parser for tagged-union submit_target
-        cfg.mining = _parse_mining_section(data)
+    _coerce_skill_sources(cfg)
+    return cfg
 
     # Apply profile even without a config file (in case defaults set one)
-    if not config_path.exists() and cfg.security.profile:
+    if cfg.security.profile:
         apply_security_profile(cfg.security, cfg.server)
+
+    # Any unknown sections in 'extra' should be merged too
+    if "extra" in data:
+        for section_name, section_data in data["extra"].items():
+            if hasattr(cfg, section_name):
+                _apply_toml_section(getattr(cfg, section_name), section_data)
+            else:
+                # It's truly unknown to the Python dataclass too, just store it
+                setattr(cfg, section_name, section_data)
 
     return cfg
 

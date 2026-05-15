@@ -312,6 +312,87 @@ impl WorkflowBuilder {
 }
 
 // ---------------------------------------------------------------------------
+// Durable Execution & Persistence
+// ---------------------------------------------------------------------------
+
+use rusqlite::{params, Connection};
+use std::sync::Mutex;
+use chrono::Utc;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowExecutionState {
+    pub execution_id: String,
+    pub workflow_name: String,
+    pub completed_nodes: HashMap<String, WorkflowStepResult>,
+    pub pending_nodes: Vec<String>,
+    pub start_time: i64,
+}
+
+pub struct DurableWorkflowStore {
+    conn: Mutex<Connection>,
+}
+
+impl DurableWorkflowStore {
+    pub fn new(db_path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let conn = Connection::open(db_path)?;
+        
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS workflow_snapshots (
+                id TEXT PRIMARY KEY,
+                workflow_name TEXT NOT NULL,
+                state_json TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+
+        Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    pub fn save_snapshot(&self, state: &WorkflowExecutionState) -> Result<(), Box<dyn std::error::Error>> {
+        let conn = self.conn.lock().unwrap();
+        let state_json = serde_json::to_string(state)?;
+        let now = Utc::now().timestamp();
+
+        conn.execute(
+            "INSERT OR REPLACE INTO workflow_snapshots (id, workflow_name, state_json, updated_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![state.execution_id, state.workflow_name, state_json, now],
+        )?;
+
+        Ok(())
+    }
+
+    pub fn load_snapshot(&self, execution_id: &str) -> Result<Option<WorkflowExecutionState>, Box<dyn std::error::Error>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT state_json FROM workflow_snapshots WHERE id = ?1")?;
+        
+        let mut rows = stmt.query(params![execution_id])?;
+        if let Some(row) = rows.next()? {
+            let json: String = row.get(0)?;
+            let state: WorkflowExecutionState = serde_json::from_str(&json)?;
+            Ok(Some(state))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn list_active_workflows(&self) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT id, workflow_name FROM workflow_snapshots ORDER BY updated_at DESC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+
+        let mut results = Vec::new();
+        for r in rows {
+            results.push(r?);
+        }
+        Ok(results)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -494,5 +575,44 @@ mod tests {
                 condition: String::new(),
             })
             .is_err());
+    }
+
+    #[test]
+    fn test_durable_workflow_recovery() {
+        let db_path = "test_workflow.db";
+        let store = DurableWorkflowStore::new(db_path).unwrap();
+        
+        let exec_id = "test-exec-001".to_string();
+        let mut completed = HashMap::new();
+        completed.insert("node_1".into(), WorkflowStepResult {
+            node_id: "node_1".into(),
+            output: serde_json::json!({"result": "ok"}),
+            success: true,
+            duration_ms: 100.0,
+        });
+
+        let state = WorkflowExecutionState {
+            execution_id: exec_id.clone(),
+            workflow_name: "test_workflow".into(),
+            completed_nodes: completed,
+            pending_nodes: vec!["node_2".into()],
+            start_time: 123456789,
+        };
+
+        // 1. Save Snapshot
+        store.save_snapshot(&state).unwrap();
+
+        // 2. Simulate System Crash (new store instance, no memory)
+        let new_store = DurableWorkflowStore::new(db_path).unwrap();
+        
+        // 3. Recover
+        let recovered = new_store.load_snapshot(&exec_id).unwrap().expect("Snapshot should exist");
+
+        assert_eq!(recovered.workflow_name, "test_workflow");
+        assert_eq!(recovered.pending_nodes, vec!["node_2".to_string()]);
+        assert!(recovered.completed_nodes.contains_key("node_1"));
+        
+        // Cleanup
+        let _ = std::fs::remove_file(db_path);
     }
 }

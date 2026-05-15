@@ -73,45 +73,33 @@ impl<E: InferenceEngine> GuardrailsEngine<E> {
         match self.mode {
             RedactionMode::Warn => {
                 if let Some(ref bus) = self.bus {
-                    let mut data = std::collections::HashMap::new();
-                    data.insert(
-                        "direction".to_string(),
-                        Value::String(direction.to_string()),
-                    );
-                    data.insert("findings".to_string(), Value::Array(finding_dicts));
-                    data.insert("mode".to_string(), Value::String("warn".to_string()));
+                    let data = serde_json::json!({
+                        "direction": direction,
+                        "findings": finding_dicts,
+                        "mode": "warn"
+                    });
                     bus.publish(EventType::SecurityAlert, data);
                 }
                 Ok(text.to_string())
             }
             RedactionMode::Redact => {
                 if let Some(ref bus) = self.bus {
-                    let mut data = std::collections::HashMap::new();
-                    data.insert(
-                        "direction".to_string(),
-                        Value::String(direction.to_string()),
-                    );
-                    data.insert("findings".to_string(), Value::Array(finding_dicts));
-                    data.insert(
-                        "mode".to_string(),
-                        Value::String("redact".to_string()),
-                    );
+                    let data = serde_json::json!({
+                        "direction": direction,
+                        "findings": finding_dicts,
+                        "mode": "redact"
+                    });
                     bus.publish(EventType::SecurityAlert, data);
                 }
                 Ok(self.redact_text(text))
             }
             RedactionMode::Block => {
                 if let Some(ref bus) = self.bus {
-                    let mut data = std::collections::HashMap::new();
-                    data.insert(
-                        "direction".to_string(),
-                        Value::String(direction.to_string()),
-                    );
-                    data.insert("findings".to_string(), Value::Array(finding_dicts));
-                    data.insert(
-                        "mode".to_string(),
-                        Value::String("block".to_string()),
-                    );
+                    let data = serde_json::json!({
+                        "direction": direction,
+                        "findings": finding_dicts,
+                        "mode": "block"
+                    });
                     bus.publish(EventType::SecurityBlock, data);
                 }
                 Err(SUNDAYError::Security(

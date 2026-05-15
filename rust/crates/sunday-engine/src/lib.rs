@@ -6,6 +6,7 @@
 pub mod discovery;
 pub mod engine_enum;
 pub mod llamacpp;
+pub mod native;
 pub mod ollama;
 pub mod openai_compat;
 pub mod rig_adapter;
@@ -19,5 +20,5 @@ pub use llamacpp::LlamaCppEngine;
 pub use ollama::OllamaEngine;
 pub use openai_compat::OpenAICompatEngine;
 pub use sglang::SGLangEngine;
-pub use traits::{InferenceEngine, messages_to_dicts};
+pub use traits::{InferenceEngine, messages_to_dicts, TokenStream};
 pub use vllm::VLLMEngine;

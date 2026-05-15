@@ -8,6 +8,7 @@ pub mod native_react;
 pub mod orchestrator;
 pub mod simple;
 pub mod traits;
+pub mod runtime;
 pub mod utils;
 
 pub use helpers::AgentHelpers;
@@ -19,5 +20,6 @@ pub use monitor_operative::{
 pub use native_openhands::NativeOpenHandsAgent;
 pub use native_react::NativeReActAgent;
 pub use orchestrator::OrchestratorAgent;
+pub use runtime::{AgentRuntime, AgentState, AgentStatus};
 pub use simple::SimpleAgent;
 pub use traits::OjAgent;

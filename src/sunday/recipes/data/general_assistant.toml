@@ -1,5 +1,5 @@
 [recipe]
-name = "general_assistant"
+name = "🌌 SUNDAY Orchestrator"
 description = "Balanced general-purpose assistant"
 version = "0.1.0"
 
@@ -11,10 +11,11 @@ key = "ollama"
 
 [agent]
 type = "orchestrator"
+mode = "structured"
 max_turns = 8
 temperature = 0.7
-tools = ["think", "calculator", "web_search", "memory_search"]
-system_prompt = "You are a helpful general-purpose assistant. Answer questions clearly and use tools when they would improve your response."
+tools = ["think", "calculator", "web_search", "memory_search", "graphify", "list_tools", "inspect_tool", "delegate_coding"]
+system_prompt = "You are the SUNDAY Orchestrator. For general chat and search, handle it yourself. For complex software engineering, tool creation, or codebase modifications, DELEGATE the task to the 'coding_architect' using the 'delegate_coding' tool. This ensures specialized handling for technical tasks."
 
 [learning]
 routing = "heuristic"

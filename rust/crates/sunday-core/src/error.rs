@@ -103,6 +103,12 @@ pub enum EngineError {
 
     #[error("Tokenizer error: {0}")]
     Tokenizer(String),
+    
+    #[error("Initialization failed: {0}")]
+    Initialization(String),
+
+    #[error("Method not implemented: {0}")]
+    NotImplemented(String),
 }
 
 /// Tool execution errors.
@@ -153,6 +159,9 @@ pub enum SecurityError {
 
     #[error("Signing error: {0}")]
     Signing(String),
+
+    #[error("Policy violation: {0}")]
+    PolicyViolation(String),
 }
 
 /// Storage / memory backend errors.
