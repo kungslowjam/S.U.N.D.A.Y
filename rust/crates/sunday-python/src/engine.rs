@@ -91,6 +91,11 @@ impl PyEngine {
                     120.0,
                 ),
             ),
+            "native" => sunday_engine::Engine::Native(
+                sunday_engine::NativeLlamaEngine::new(
+                    host.unwrap_or("models/qwen3.5-0.8b-q4_k_m.gguf")
+                ).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?
+            ),
             other => {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
                     format!("Unknown engine: {}", other),

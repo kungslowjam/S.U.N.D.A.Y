@@ -13,6 +13,7 @@ from sunday.cli.bench_cmd import bench
 from sunday.cli.channel_cmd import channel
 from sunday.cli.channels_cmd import channels
 from sunday.cli.chat_cmd import chat
+from sunday.cli.code_cmd import code_command
 from sunday.cli.compose_cmd import compose
 from sunday.cli.config_cmd import config
 from sunday.cli.connect_cmd import connect
@@ -77,6 +78,7 @@ def cli(ctx: click.Context, verbose: bool, quiet: bool) -> None:
 cli.add_command(init, "init")
 cli.add_command(ask, "ask")
 cli.add_command(chat, "chat")
+cli.add_command(code_command, "code")
 cli.add_command(serve, "serve")
 cli.add_command(model, "model")
 cli.add_command(memory, "memory")

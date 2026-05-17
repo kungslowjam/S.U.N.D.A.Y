@@ -7,11 +7,14 @@ use crate::traits::{InferenceEngine, TokenStream};
 use sunday_core::error::{EngineError, SUNDAYError};
 use sunday_core::{GenerateResult, Message, Usage};
 use serde_json::Value;
+use uuid::Uuid;
+use chrono::Utc;
 
 /// llama.cpp server backend via its native HTTP API.
 ///
 /// Unlike vLLM/SGLang, llama.cpp uses `/completion` with a prompt-based
 /// request format rather than the OpenAI chat completions format.
+#[derive(Clone)]
 pub struct LlamaCppEngine {
     host: String,
     client: reqwest::blocking::Client,
@@ -222,13 +225,20 @@ impl InferenceEngine for LlamaCppEngine {
                             if chunk["stop"].as_bool().unwrap_or(false) {
                                 return None;
                             }
-                            let content = chunk["content"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
-                            if !content.is_empty() {
-                                return Some(Ok(content));
-                            }
+                            
+                            // Map llama.cpp /completion chunk to OpenAI /chat/completions chunk
+                            let content = chunk["content"].as_str().unwrap_or("").to_string();
+                            let openai_chunk = serde_json::json!({
+                                "id": format!("chatcmpl-{}", Uuid::new_v4()),
+                                "object": "chat.completion.chunk",
+                                "created": Utc::now().timestamp(),
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": { "content": content },
+                                    "finish_reason": null
+                                }]
+                            });
+                            return Some(Ok(openai_chunk));
                         }
                     }
                     None

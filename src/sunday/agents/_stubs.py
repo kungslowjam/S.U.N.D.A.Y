@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from sunday.core.config import load_config
 from sunday.core.events import EventBus, EventType
+from sunday.core.project_context import get_project_context
 from sunday.core.types import Conversation, Message, Role, ToolResult
 from sunday.core.context import ContextManager
 from sunday.engine._stubs import InferenceEngine
@@ -155,6 +156,15 @@ class BaseAgent(ABC):
                 effective_system_prompt = cfg.agent.default_system_prompt or None
             except Exception:
                 effective_system_prompt = None
+        # Inject AGENTS.md / CLAUDE.md project context into the system prompt
+        project_ctx = get_project_context()
+        if project_ctx and effective_system_prompt:
+            suffix = project_ctx.system_prompt_suffix()
+            if suffix:
+                effective_system_prompt = f"{effective_system_prompt}\n\n{suffix}"
+        elif project_ctx:
+            effective_system_prompt = project_ctx.system_prompt_suffix() or None
+
         if effective_system_prompt:
             messages.append(Message(role=Role.SYSTEM, content=effective_system_prompt))
         if context and context.conversation.messages:

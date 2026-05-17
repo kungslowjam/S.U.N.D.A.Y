@@ -35,18 +35,18 @@ impl rig::completion::request::GetTokenUsage for OjRawResponse {
 ///
 /// Uses `tokio::task::spawn_blocking` to bridge the sync `generate()` method
 /// into rig's async completion interface.
-pub struct RigModelAdapter<E: InferenceEngine> {
+pub struct RigModelAdapter<E: InferenceEngine + ?Sized> {
     engine: Arc<E>,
     model_id: String,
 }
 
-impl<E: InferenceEngine> RigModelAdapter<E> {
+impl<E: InferenceEngine + ?Sized> RigModelAdapter<E> {
     pub fn new(engine: Arc<E>, model_id: String) -> Self {
         Self { engine, model_id }
     }
 }
 
-impl<E: InferenceEngine> Clone for RigModelAdapter<E> {
+impl<E: InferenceEngine + ?Sized> Clone for RigModelAdapter<E> {
     fn clone(&self) -> Self {
         Self {
             engine: Arc::clone(&self.engine),
@@ -155,7 +155,7 @@ fn make_raw(result: &GenerateResult) -> OjRawResponse {
     }
 }
 
-impl<E: InferenceEngine + 'static> rig::completion::request::CompletionModel
+impl<E: InferenceEngine + ?Sized + 'static> rig::completion::request::CompletionModel
     for RigModelAdapter<E>
 {
     type Response = OjRawResponse;
@@ -217,16 +217,39 @@ impl<E: InferenceEngine + 'static> rig::completion::request::CompletionModel
 
     async fn stream(
         &self,
-        _request: CompletionRequest,
+        request: CompletionRequest,
     ) -> Result<
         rig::streaming::StreamingCompletionResponse<Self::StreamingResponse>,
         CompletionError,
     > {
-        // Our engines use blocking HTTP clients. Streaming is not supported
-        // through the rig adapter — callers should use `completion()` instead.
-        Err(CompletionError::ProviderError(
-            "Streaming not supported through RigModelAdapter; use completion() instead".into(),
-        ))
+        let engine = Arc::clone(&self.engine);
+        let model_id = self.model_id.clone();
+
+        let messages = rig_request_to_oj_messages(&request);
+        let temperature = request.temperature.unwrap_or(0.7);
+        let max_tokens = request.max_tokens.unwrap_or(2048) as i64;
+        let extra = tools_to_extra(&request.tools);
+
+        let stream = engine.stream(
+            &messages,
+            &model_id,
+            temperature,
+            max_tokens,
+            extra.as_ref(),
+        ).await.map_err(|e| CompletionError::ProviderError(e.to_string()))?;
+
+        use futures::StreamExt;
+        let rig_stream = stream.map(|res| {
+            match res {
+                Ok(chunk) => {
+                    let content = chunk["choices"][0]["delta"]["content"].as_str().unwrap_or("").to_string();
+                    Ok(rig::streaming::RawStreamingChoice::Message(content))
+                },
+                Err(e) => Err(CompletionError::ProviderError(e.to_string())),
+            }
+        });
+
+        Ok(rig::streaming::StreamingCompletionResponse::stream(Box::pin(rig_stream)))
     }
 }
 

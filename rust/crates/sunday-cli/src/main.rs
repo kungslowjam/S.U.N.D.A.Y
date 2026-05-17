@@ -76,12 +76,19 @@ enum ModelAction {
 }
 
 pub fn check_port(port: u16) -> bool {
-    let addr = format!("127.0.0.1:{}", port);
-    if let Ok(socket_addr) = addr.parse() {
-        TcpStream::connect_timeout(&socket_addr, Duration::from_millis(500)).is_ok()
-    } else {
-        false
+    // Try IPv4 first
+    if let Ok(addr) = format!("127.0.0.1:{}", port).parse::<std::net::SocketAddr>() {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            return true;
+        }
     }
+    // Try IPv6 second (Vite often binds to ::1 on Windows)
+    if let Ok(addr) = format!("[::1]:{}", port).parse::<std::net::SocketAddr>() {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(200)).is_ok() {
+            return true;
+        }
+    }
+    false
 }
 
 fn wait_for_port(port: u16, timeout_sec: u64) -> bool {
@@ -117,8 +124,8 @@ fn stop_port(port: u16) -> bool {
         }
     }
 
-    // Second, safety check: kill any remaining "zombie" processes by name if they relate to SUNDAY
-    let targets = ["llama-server.exe", "uvicorn.exe", "node.exe"];
+    // Second, safety check: kill any remaining "zombie" processes by name
+    let targets = ["llama-server.exe", "sunday-server.exe", "node.exe", "sunday-discord.exe"];
     for target in targets {
         for process in sys.processes_by_exact_name(std::ffi::OsStr::new(target)) {
             println!("  Cleaning up rogue {} (PID: {})", target, process.pid());
@@ -237,7 +244,7 @@ async fn main() {
             println!("All cleared. ✨");
         }
 
-        Commands::Start { llama_port, backend_port, frontend_port, model_path, force, discord, voice, all } => {
+        Commands::Start { llama_port, backend_port, frontend_port, model_path, force: _, discord, voice, all } => {
             let start_discord = *discord || *all;
             let start_voice = *voice || *all;
             
@@ -247,13 +254,11 @@ async fn main() {
             let engine_type = config.engine.default.clone();
             let is_native = engine_type == "native";
 
-            if *force {
-                println!("Force restart enabled. Clearing ports...");
-                if !is_native {
-                    stop_port(*llama_port);
-                }
-                stop_port(*backend_port);
-                stop_port(*frontend_port);
+            // Always perform a clean start by clearing relevant ports
+            println!("Ensuring a clean state for SUNDAY Services...");
+            let ports_to_clear = [*llama_port, *backend_port, *frontend_port, 8082, 8098];
+            for port in ports_to_clear {
+                stop_port(port);
             }
 
             println!("Starting SUNDAY Services (Engine: {})...", engine_type);
@@ -269,6 +274,18 @@ async fn main() {
                 let model = model_path.clone().unwrap_or_else(|| {
                     if !config.intelligence.model_path.is_empty() {
                         config.intelligence.model_path.clone()
+                    } else if !config.intelligence.default_model.is_empty() {
+                        let dm = &config.intelligence.default_model;
+                        // If it looks like a relative path or just a filename, prefix it
+                        if dm.contains('/') || dm.contains('\\') || dm.ends_with(".gguf") {
+                            if !dm.contains('/') && !dm.contains('\\') {
+                                format!("llama-cpp/models/{}", dm)
+                            } else {
+                                dm.clone()
+                            }
+                        } else {
+                            dm.clone()
+                        }
                     } else {
                         "llama-cpp/models/Qwen3.5-9B-DeepSeek-V4-Flash-Q4_K_S.gguf".to_string()
                     }
@@ -289,8 +306,10 @@ async fn main() {
                     .args(&[
                         "-m", model_full_path.to_str().unwrap(),
                         "--port", &llama_port.to_string(),
-                        "-ngl", "35",
-                        "-c", "16384",
+                        "-ngl", "999",
+                        "-c", "2048",
+                        "-t", "6",
+                        "--flash-attn",
                     ])
                     .current_dir(root.join("llama-cpp"))
                     .stdout(Stdio::null())
@@ -307,20 +326,19 @@ async fn main() {
                 println!("[2/5] [SKIP] SUNDAY Backend is already running on port {}", backend_port);
             } else {
                 println!("[2/5] Launching SUNDAY Backend...");
-                let python_exe = root.join(".venv").join("Scripts").join("python.exe");
+                let backend_exe = root.join("rust").join("target").join("release").join("sunday-server.exe");
                 
-                let child = Command::new(&python_exe)
-                    .args(&[
-                        "-m", "sunday", "serve",
-                        "--engine", &engine_type,
-                        "--agent", "orchestrator",
-                        "--port", &backend_port.to_string(),
-                    ])
-                    .env("PYTHONPATH", root.join("src").to_str().unwrap())
-                    .env("OPENSUNDAY_CONFIG", config_path.to_str().unwrap())
+                if !backend_exe.exists() {
+                    println!("      \x1b[31m[ERROR]\x1b[0m Rust backend not found at: {}", backend_exe.display());
+                    println!("      Run 'cargo build --release -p sunday-server' first.");
+                    return;
+                }
+
+                println!("      Using Rust-native backend: {}", backend_exe.display());
+                let child = Command::new(&backend_exe)
                     .current_dir(&root)
                     .stdout(Stdio::null())
-                    .stderr(Stdio::null())
+                    .stderr(Stdio::piped()) // Capture stderr for debugging
                     .spawn()
                     .expect("Failed to start SUNDAY backend");
 
@@ -342,9 +360,8 @@ async fn main() {
                     .expect("Failed to start frontend");
 
                 println!("      Frontend started (PID: {})", child.id());
-                if !wait_for_port(*frontend_port, 120) {
-                    eprintln!("      [WARN] Frontend port {} not ready after 60s, trying alternate port check...", frontend_port);
-                    // Vite may use a different port if 5173 is taken
+                if !wait_for_port(*frontend_port, 60) {
+                    eprintln!("      [WARN] Frontend port {} not ready after 60s, it may still be bundling...", frontend_port);
                     std::thread::sleep(Duration::from_secs(2));
                 }
             }

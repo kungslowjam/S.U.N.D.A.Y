@@ -650,3 +650,29 @@ class AgentExecutor:
                 agent_id,
                 exc_info=True,
             )
+
+        # Throttled skill-evolution batch processing (Hermes-style closed loop).
+        # Only run every ~5 minutes so it doesn't slow down ticks.
+        self._maybe_process_skills_batch()
+
+    _last_skill_batch_time: float = 0.0
+
+    def _maybe_process_skills_batch(self) -> None:
+        """Trigger skill batch processing if enough time has elapsed."""
+        now = time.time()
+        if now - AgentExecutor._last_skill_batch_time < 300:
+            return
+        AgentExecutor._last_skill_batch_time = now
+
+        skill_manager = getattr(self._system, "skill_manager", None)
+        if skill_manager is None:
+            return
+        try:
+            discovered = skill_manager.process_skills_batch(limit=50)
+            if discovered:
+                logger.info(
+                    "Skill evolution discovered/updated %d skill(s)",
+                    len(discovered),
+                )
+        except Exception:
+            logger.debug("Skill batch processing skipped", exc_info=True)

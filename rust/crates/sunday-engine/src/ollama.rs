@@ -4,6 +4,8 @@ use crate::traits::{InferenceEngine, TokenStream};
 use sunday_core::error::{EngineError, SUNDAYError};
 use sunday_core::{GenerateResult, Message, ToolCall, Usage};
 use serde_json::Value;
+use uuid::Uuid;
+use chrono::Utc;
 
 /// Ollama backend via its native HTTP API.
 pub struct OllamaEngine {
@@ -201,16 +203,21 @@ impl InferenceEngine for OllamaEngine {
                             continue;
                         }
                         if let Ok(chunk) = serde_json::from_str::<Value>(line) {
-                            let content = chunk["message"]["content"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
-                            if !content.is_empty() {
-                                return Some(Ok(content));
-                            }
-                            if chunk["done"].as_bool().unwrap_or(false) {
-                                return None;
-                            }
+                            let content = chunk["message"]["content"].as_str().unwrap_or("").to_string();
+                            let done = chunk["done"].as_bool().unwrap_or(false);
+                            
+                            let openai_chunk = serde_json::json!({
+                                "id": format!("chatcmpl-{}", Uuid::new_v4()),
+                                "object": "chat.completion.chunk",
+                                "created": Utc::now().timestamp(),
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": { "content": content },
+                                    "finish_reason": if done { Some("stop") } else { None }
+                                }]
+                            });
+                            
+                            return Some(Ok(openai_chunk));
                         }
                     }
                     None

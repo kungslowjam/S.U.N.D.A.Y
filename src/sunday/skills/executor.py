@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -51,8 +53,10 @@ class SkillExecutor:
         manifest: SkillManifest,
         *,
         initial_context: Optional[Dict[str, Any]] = None,
+        trace_id: Optional[str] = None,
     ) -> SkillResult:
         """Execute all steps in a skill manifest."""
+        start = time.time()
         ctx: Dict[str, Any] = dict(initial_context or {})
         all_results: List[ToolResult] = []
 
@@ -107,6 +111,17 @@ class SkillExecutor:
                 EventType.SKILL_EXECUTE_END,
                 {"skill": manifest.name, "success": success},
             )
+
+        # Record outcome to the Rust skill-evolution engine (best-effort)
+        try:
+            from sunday._rust_bridge import get_skill_evolution_engine
+
+            engine = get_skill_evolution_engine()
+            if engine is not None:
+                tid = trace_id or str(uuid.uuid4())
+                engine.record_skill_outcome(manifest.name, tid, success)
+        except Exception:
+            pass  # Rust backend may be absent or the engine not wired yet
 
         return SkillResult(
             skill_name=manifest.name,

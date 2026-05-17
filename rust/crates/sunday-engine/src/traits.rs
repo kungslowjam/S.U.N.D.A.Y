@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::pin::Pin;
 use tokio_stream::Stream;
 
-pub type StreamItem = Result<String, sunday_core::SUNDAYError>;
+pub type StreamItem = Result<serde_json::Value, sunday_core::SUNDAYError>;
 pub type TokenStream = Pin<Box<dyn Stream<Item = StreamItem> + Send>>;
 
 /// ABC for all inference engine backends.

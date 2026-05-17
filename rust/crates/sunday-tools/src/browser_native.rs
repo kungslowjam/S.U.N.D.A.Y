@@ -1,200 +1,183 @@
 use chromiumoxide::browser::{Browser, BrowserConfig};
-use chromiumoxide::handler::viewport::Viewport;
 use chromiumoxide::page::Page;
+use chromiumoxide::cdp::browser_protocol::page::{CaptureScreenshotParams, CaptureScreenshotFormat};
 use chromiumoxide::layout::Point;
-use chromiumoxide::cdp::browser_protocol::page::AddScriptToEvaluateOnNewDocumentParams;
 use futures::StreamExt;
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tracing::{info, error};
+use anyhow::{Result, anyhow};
+use parking_lot::Mutex;
 use rand::Rng;
 use std::time::Duration;
-use serde_json;
-#[cfg(feature = "vision")]
-use sunday_vision::VisionEngine;
-use sunday_core::SharedMemorySegment;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use crate::browser_native_js::{POPUP_KILLER_JS, AX_TREE_EXTRACTOR_JS};
 
-use crate::browser_native_js::*;
-
-pub struct BrowserController {
-    browser: Browser,
-    handle: tokio::task::JoinHandle<()>,
+/// High-performance Native Browser Controller using chromiumoxide.
+pub struct NativeBrowser {
+    pub browser: Browser,
+    pub page: Arc<Page>,
+    pub handle: tokio::task::JoinHandle<()>,
 }
 
-impl BrowserController {
-    pub async fn launch(headless: bool) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
-        let config = BrowserConfig::builder()
-            .viewport(Viewport {
-                width: 1280,
-                height: 720,
-                ..Default::default()
-            })
-            .args(vec![
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-infobars",
-                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            ]);
+impl NativeBrowser {
+    pub async fn new(headless: bool) -> Result<Self> {
+        let mut builder = BrowserConfig::builder()
+            .chrome_executable(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
+            .arg("--no-sandbox")
+            .arg("--disable-dev-shm-usage")
+            .arg("--disable-gpu")
+            .arg("--disable-web-security");
+        if !headless {
+            builder = builder.with_head();
+        }
         
-        let config = if headless {
-            config.build()?
-        } else {
-            config.with_head().build()?
-        };
-
+        let config = builder.build().map_err(|e| anyhow!(e))?;
         let (browser, mut handler) = Browser::launch(config).await?;
 
-        // Spawn handler in background
         let handle = tokio::spawn(async move {
             while let Some(h) = handler.next().await {
                 if let Err(e) = h {
-                    error!("Browser handler error: {}", e);
-                    break;
+                    // Log the error but NEVER break the browser event loop!
+                    tracing::warn!("Native browser handler error: {:?}", e);
                 }
             }
         });
 
-        Ok(Self { browser, handle })
-    }
-
-    pub async fn new_page(&self) -> Result<Page, Box<dyn std::error::Error + Send + Sync>> {
-        let page = self.browser.new_page("about:blank").await?;
+        let page = Arc::new(browser.new_page("about:blank").await?);
+        page.evaluate_on_new_document(POPUP_KILLER_JS).await?;
         
-        // Inject JARVIS and Visuals (CDP way)
-        page.execute(AddScriptToEvaluateOnNewDocumentParams::new(JARVIS_SCRIPT.to_string())).await?;
-        page.execute(AddScriptToEvaluateOnNewDocumentParams::new(VISUAL_CURSOR_SCRIPT.to_string())).await?;
-        page.execute(AddScriptToEvaluateOnNewDocumentParams::new(AX_TREE_SCRIPT.to_string())).await?;
-        
-        // Spoof navigator.webdriver
-        page.execute(AddScriptToEvaluateOnNewDocumentParams::new("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})".to_string())).await?;
-
-        Ok(page)
-    }
-
-    pub async fn close(mut self) {
-        let _ = self.browser.close().await;
-        self.handle.abort();
+        Ok(Self { browser, page, handle })
     }
 }
 
+/// Thread-safe Session Manager for NativeBrowser.
 pub struct NativeBrowserSession {
-    controller: Arc<Mutex<Option<BrowserController>>>,
-    current_page: Arc<Mutex<Option<Page>>>,
+    instance: Mutex<Option<Arc<NativeBrowser>>>,
 }
 
 impl NativeBrowserSession {
     pub fn new() -> Self {
         Self {
-            controller: Arc::new(Mutex::new(None)),
-            current_page: Arc::new(Mutex::new(None)),
+            instance: Mutex::new(None),
         }
     }
 
-    pub async fn ensure_page(&self, headless: bool) -> Result<Page, Box<dyn std::error::Error + Send + Sync>> {
-        let mut ctrl_lock = self.controller.lock().await;
-        if ctrl_lock.is_none() {
-            info!("Launching native Rust browser...");
-            *ctrl_lock = Some(BrowserController::launch(headless).await?);
+    pub async fn ensure_page(&self, headless: bool) -> Result<Arc<Page>> {
+        let mut lock = self.instance.lock();
+        if lock.is_none() {
+            let browser = NativeBrowser::new(headless).await?;
+            *lock = Some(Arc::new(browser));
         }
-
-        let mut page_lock = self.current_page.lock().await;
-        if page_lock.is_none() {
-            if let Some(ctrl) = ctrl_lock.as_ref() {
-                *page_lock = Some(ctrl.new_page().await?);
-            }
-        }
-
-        Ok(page_lock.as_ref().unwrap().clone())
+        Ok(lock.as_ref().unwrap().page.clone())
     }
 
-    /// Move mouse in a human-like way with randomized jitter and curves
-    pub async fn move_mouse_human(&self, target_x: f64, target_y: f64) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let page = self.current_page.lock().await.as_ref().ok_or("No active page")?.clone();
+    pub async fn human_click(&self, selector: &str) -> Result<()> {
+        let page = self.ensure_page(false).await?;
         
-        let steps = 10;
-        let mut rng = rand::thread_rng();
+        // Get coordinates via JS since box_model is private
+        let js = format!(r#"
+            (() => {{
+                const el = document.querySelector("{}");
+                if (!el) return null;
+                const r = el.getBoundingClientRect();
+                return {{ x: r.left + r.width/2, y: r.top + r.height/2 }};
+            }})()
+        "#, selector);
         
-        for i in 1..=steps {
-            let progress = i as f64 / steps as f64;
-            let jitter_x = rng.gen_range(-2.0..2.0);
-            let jitter_y = rng.gen_range(-2.0..2.0);
+        let result = page.evaluate(js).await?;
+        if let Some(coords) = result.value() {
+            let x = coords["x"].as_f64().unwrap_or(0.0);
+            let y = coords["y"].as_f64().unwrap_or(0.0);
             
-            let cur_x = target_x * progress;
-            let cur_y = target_y * progress;
-
-            // We also update the visual cursor
-            let _ = page.evaluate(format!("window.__move_cursor({}, {})", cur_x, cur_y)).await;
-            
-            page.move_mouse(Point { x: cur_x + jitter_x, y: cur_y + jitter_y }).await?;
-            tokio::time::sleep(Duration::from_millis(rng.gen_range(5..15))).await;
+            page.move_mouse(Point { x, y }).await?;
+            tokio::time::sleep(Duration::from_millis(rand::thread_rng().gen_range(50..150))).await;
+            page.find_element(selector).await?.click().await?;
         }
-        
-        // Final precise move
-        page.move_mouse(Point { x: target_x, y: target_y }).await?;
-        let _ = page.evaluate(format!("window.__move_cursor({}, {})", target_x, target_y)).await;
         
         Ok(())
     }
 
-    pub async fn get_ax_tree(&self) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-        let page = self.current_page.lock().await.as_ref().ok_or("No active page")?.clone();
-        let tree = page.evaluate("window.__get_ax_tree()").await?.into_value()?;
-        Ok(tree)
+    pub async fn human_type(&self, selector: &str, text: &str) -> Result<()> {
+        let page = self.ensure_page(false).await?;
+        let element = page.find_element(selector).await?;
+        element.click().await?;
+        
+        let mut rng = rand::thread_rng();
+        for c in text.chars() {
+            element.type_str(c.to_string()).await?;
+            tokio::time::sleep(Duration::from_millis(rng.gen_range(30..120))).await;
+        }
+        Ok(())
     }
 
-    pub async fn capture_screenshot(&self) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-        let page = self.current_page.lock().await.as_ref().ok_or("No active page")?.clone();
-        let screenshot = page.screenshot(chromiumoxide::page::ScreenshotParams::builder().full_page(false).build()).await?;
-        Ok(screenshot)
+    pub async fn get_ax_tree(&self) -> Result<serde_json::Value> {
+        let page = self.ensure_page(false).await?;
+        let result = page.evaluate(AX_TREE_EXTRACTOR_JS).await?;
+        Ok(result.value().cloned().unwrap_or(serde_json::Value::Array(vec![])))
     }
 
-    pub async fn capture_screenshot_base64(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let screenshot = self.capture_screenshot().await?;
-        Ok(BASE64.encode(screenshot))
-    }
-
-    pub async fn get_content(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let page = self.current_page.lock().await.as_ref().ok_or("No active page")?.clone();
+    pub async fn get_content(&self) -> Result<String> {
+        let page = self.ensure_page(false).await?;
         let content = page.content().await?;
         Ok(content)
     }
 
-    pub async fn press_key(&self, key: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let page = self.current_page.lock().await.as_ref().ok_or("No active page")?.clone();
-        // Use JS evaluation for keyboard events to bypass library version issues
-        page.evaluate(format!(
-            "window.dispatchEvent(new KeyboardEvent('keydown', {{'key': '{}', 'bubbles': true}})); \
-             window.dispatchEvent(new KeyboardEvent('keyup', {{'key': '{}', 'bubbles': true}}));",
-            key, key
-        )).await?;
+    pub async fn press_key(&self, key: &str) -> Result<()> {
+        let page = self.ensure_page(false).await?;
+        page.evaluate(format!("document.dispatchEvent(new KeyboardEvent('keydown', {{key: '{}'}}))", key)).await?;
         Ok(())
     }
 
-    pub async fn scroll(&self, x: i32, y: i32) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let page = self.current_page.lock().await.as_ref().ok_or("No active page")?.clone();
+    pub async fn scroll(&self, x: i32, y: i32) -> Result<()> {
+        let page = self.ensure_page(false).await?;
         page.evaluate(format!("window.scrollBy({}, {})", x, y)).await?;
         Ok(())
     }
 
-    /// Perform vision analysis on the current screen
-    #[cfg(feature = "vision")]
-    pub async fn vision_analyze(&self, model_path: &str) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-        let screenshot = self.capture_screenshot().await?;
-        let mut engine = VisionEngine::new(model_path)?;
-        let results = engine.detect_objects(&screenshot)?;
-        Ok(results)
+    pub async fn capture_screenshot_base64(&self) -> Result<String> {
+        use base64::Engine;
+        let page = self.ensure_page(false).await?;
+        let params = CaptureScreenshotParams::builder()
+            .format(CaptureScreenshotFormat::Jpeg)
+            .quality(80)
+            .build();
+        let data = page.screenshot(params).await?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(data))
     }
 
-    /// Capture screenshot and write it to shared memory for Zero-latency bridge
-    pub async fn capture_screenshot_shared(&self, buffer_name: &str) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-        let screenshot = self.capture_screenshot().await?;
-        let size = screenshot.len();
-        
-        // Ensure shared memory segment exists
-        let buffer = SharedMemorySegment::new(buffer_name);
-        buffer.write(&screenshot)?;
-        
-        Ok(size)
+    pub async fn capture_screenshot_file(&self) -> Result<String> {
+        let page = self.ensure_page(false).await?;
+        let params = CaptureScreenshotParams::builder()
+            .format(CaptureScreenshotFormat::Jpeg)
+            .quality(80)
+            .build();
+        let data = page.screenshot(params).await?;
+
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
+        let tmp_dir = std::path::PathBuf::from(home).join(".sunday").join("tmp");
+        if !tmp_dir.exists() {
+            std::fs::create_dir_all(&tmp_dir)?;
+        }
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+
+        let filename = format!("screenshot_{}.jpg", timestamp);
+        let file_path = tmp_dir.join(&filename);
+        std::fs::write(&file_path, data)?;
+
+        Ok(file_path.to_string_lossy().into_owned())
+    }
+
+    pub async fn capture_screenshot_shared(&self, _name: &str) -> Result<usize> {
+        let page = self.ensure_page(false).await?;
+        let params = CaptureScreenshotParams::builder()
+            .format(CaptureScreenshotFormat::Jpeg)
+            .quality(80)
+            .build();
+        let data = page.screenshot(params).await?;
+        Ok(data.len())
     }
 }

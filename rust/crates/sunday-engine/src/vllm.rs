@@ -8,6 +8,7 @@ use sunday_core::{GenerateResult, Message, ToolCall, Usage};
 use serde_json::Value;
 
 /// vLLM backend via its OpenAI-compatible HTTP API.
+#[derive(Clone)]
 pub struct VLLMEngine {
     host: String,
     client: reqwest::blocking::Client,
@@ -269,13 +270,7 @@ impl InferenceEngine for VLLMEngine {
                         }
                         let json_str = line.strip_prefix("data: ").unwrap_or(line);
                         if let Ok(chunk) = serde_json::from_str::<Value>(json_str) {
-                            let content = chunk["choices"][0]["delta"]["content"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
-                            if !content.is_empty() {
-                                return Some(Ok(content));
-                            }
+                            return Some(Ok(chunk));
                         }
                     }
                     None

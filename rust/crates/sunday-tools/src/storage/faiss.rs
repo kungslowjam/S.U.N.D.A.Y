@@ -1,12 +1,14 @@
 //! FAISS-style vector similarity memory backend — pure Rust brute-force cosine similarity.
 
 use crate::storage::traits::MemoryBackend;
+use crate::storage::embeddings::Embedder;
 use sunday_core::{SUNDAYError, RetrievalResult};
 use parking_lot::Mutex;
 use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Default embedding dimension used by the dummy `embed()` stub.
@@ -26,10 +28,15 @@ pub struct FAISSMemory {
     conn: Mutex<Connection>,
     _db_path: PathBuf,
     dim: usize,
+    embedder: Option<Arc<dyn Embedder>>,
 }
 
 impl FAISSMemory {
     pub fn new(db_path: &Path, dim: usize) -> Result<Self, SUNDAYError> {
+        Self::with_embedder(db_path, dim, None)
+    }
+
+    pub fn with_embedder(db_path: &Path, dim: usize, embedder: Option<Arc<dyn Embedder>>) -> Result<Self, SUNDAYError> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 SUNDAYError::Io(std::io::Error::other(e))
@@ -62,6 +69,7 @@ impl FAISSMemory {
             conn: Mutex::new(conn),
             _db_path: db_path.to_path_buf(),
             dim,
+            embedder,
         })
     }
 
@@ -73,15 +81,28 @@ impl FAISSMemory {
         Self::new(Path::new(":memory:"), dim)
     }
 
-    /// Dummy embedding stub — produces a deterministic vector from text by hashing.
+    /// Generate an embedding vector for the given text.
     ///
-    /// Real embeddings should be provided externally (e.g. from Python / an LLM).
+    /// If an embedder is configured, uses it; otherwise falls back to a
+    /// deterministic hash stub for testing.
     pub fn embed(&self, text: &str) -> Vec<f64> {
+        if let Some(ref embedder) = self.embedder {
+            match embedder.embed(text) {
+                Ok(vec_f32) => {
+                    // Convert f32 → f64 for compatibility with existing storage
+                    return vec_f32.into_iter().map(|f| f as f64).collect();
+                }
+                Err(e) => {
+                    tracing::warn!("Embedder failed ({}), falling back to hash stub", e);
+                }
+            }
+        }
+
+        // Fallback hash stub
         let mut vec = vec![0.0f64; self.dim];
         for (i, byte) in text.bytes().enumerate() {
             vec[i % self.dim] += byte as f64;
         }
-        // L2-normalise so cosine similarity is meaningful.
         let norm = vec.iter().map(|x| x * x).sum::<f64>().sqrt();
         if norm > 0.0 {
             for v in &mut vec {

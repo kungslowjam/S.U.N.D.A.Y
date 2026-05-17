@@ -128,9 +128,54 @@ class OrchestratorAgent(ToolUsingAgent):
         context: Optional[AgentContext] = None,
         **kwargs: Any,
     ) -> AgentResult:
-        if self._mode == "structured":
-            return self._run_structured(input, context, **kwargs)
-        return self._run_function_calling(input, context, **kwargs)
+        # 🦀 HARNESS MODE: Skip Rust native agent when forcing local mode
+        import os
+        if os.environ.get("SUNDAY_ENGINE") == "llamacpp" or os.environ.get("SUNDAY_HARNESS_MODE") == "1":
+            self._emit_turn_start(input)
+            if self._mode == "structured":
+                return self._run_structured(input, context, **kwargs)
+            return self._run_function_calling(input, context, **kwargs)
+
+        # Delegate core loop to Rust OrchestratorAgent natively
+        self._emit_turn_start(input)
+
+        try:
+            from sunday._rust_bridge import get_rust_module
+            rust_mod = get_rust_module()
+            
+            engine_key = getattr(self._engine, "engine_id", "ollama")
+            
+            sys_prompt = self._system_prompt or "You are a helpful orchestrator agent."
+            if not self._system_prompt and self._tools:
+                from sunday.learning.intelligence.orchestrator.prompt_registry import build_system_prompt
+                sys_prompt = build_system_prompt(tools=self._tools)
+
+            agent = rust_mod.OrchestratorAgent(
+                engine_key=engine_key,
+                host="http://localhost:11434",
+                model=self._model,
+                system_prompt=sys_prompt,
+                max_turns=self._max_turns,
+                temperature=self._temperature,
+            )
+            
+            # Execute natively in Rust
+            result = agent.run(input)
+            
+            self._emit_turn_end(turns=result.turns)
+            return AgentResult(
+                content=result.content,
+                tool_results=[],
+                turns=result.turns,
+                metadata={"rust_native": True},
+            )
+
+        except Exception as e:
+            # Fallback for errors or unsupported configs
+            print(f"[🛡️ RESILIENT] Rust native execution failed: {e}. Falling back to Python orchestrator...")
+            if self._mode == "structured":
+                return self._run_structured(input, context, **kwargs)
+            return self._run_function_calling(input, context, **kwargs)
 
     @property
     def _config(self):
@@ -141,6 +186,12 @@ class OrchestratorAgent(ToolUsingAgent):
         """Centralized generation with Smart Hybrid Routing."""
         # Use explicit provider if set, else fallback to config
         provider = self._provider or self._config.intelligence.provider
+        
+        # 🦀 HARNESS MODE: If env forces local, ensure we use a local engine
+        import os
+        is_harness = os.environ.get("SUNDAY_ENGINE") == "llamacpp" or os.environ.get("SUNDAY_HARNESS_MODE") == "1"
+        if is_harness:
+            provider = "local"
         
         # 🛡️ STRICT PROTOCOL: Force the model to be concise and hide internal monologues
         protocol_fix = (
@@ -187,13 +238,27 @@ class OrchestratorAgent(ToolUsingAgent):
                 brain_tag = f"[{provider.upper()}]"
 
         # 🔑 API KEY RESOLVER: Prioritize .env if config is empty
-        import os
         api_key = os.getenv("OPENROUTER_API_KEY")
         if api_key and current_provider == "openrouter":
             print(f"[HYBRID] Routing to Cloud via OpenRouter...")
 
+        # 🦀 HARNESS MODE: If the current engine is cloud but we need local, swap engines
+        engine = self._engine
+        engine_id = getattr(engine, "engine_id", "")
+        if is_harness and current_provider == "local" and engine_id in ("cloud", "openrouter", "openai"):
+            # Directly instantiate the llamacpp OpenAI-compatible engine
+            # bypassing discovery to avoid fallback to cloud
+            from sunday.engine._openai_compat import _OpenAICompatibleEngine
+            local_engine = type(
+                "LlamaCppEngine",
+                (_OpenAICompatibleEngine,),
+                {"engine_id": "llamacpp", "_default_host": "http://127.0.0.1:8081", "_api_prefix": "/v1"},
+            )(host="http://127.0.0.1:8081")
+            engine = local_engine
+            print(f"[🦀 HARNESS] Swapped to local engine: llamacpp @ 127.0.0.1:8081")
+
         try:
-            res = self._engine.generate(
+            res = engine.generate(
                 messages,
                 model=model,
                 temperature=kwargs.pop("temperature", self._temperature),
@@ -222,11 +287,16 @@ class OrchestratorAgent(ToolUsingAgent):
     def _classify_task(self, messages: List[Message]) -> str:
         """Classify task complexity for hybrid routing.
         
-        Returns 'cloud' or 'local' based on a 3-tier heuristic:
-        1. If data is already retrieved → local (summarization)
-        2. If task requires tools (browsing/searching) → cloud (reasoning)
-        3. Simple chat → local (fast response)
+        Returns 'cloud' or 'local' based on a 3-tier heuristic.
+        HARNESS MODE: When SUNDAY_ENGINE=llamacpp or no cloud key, always local.
         """
+        import os
+        # 🦀 HARNESS MODE: Force local if env says so or no cloud keys available
+        if os.environ.get("SUNDAY_ENGINE") == "llamacpp" or os.environ.get("SUNDAY_HARNESS_MODE") == "1":
+            return "local"
+        if not (os.environ.get("OPENAI_API_KEY") or os.environ.get("OPENROUTER_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")):
+            return "local"
+
         # 🛡️ SAFE JOIN: Handle messages with None content (e.g. assistant tool calls)
         full_text = " ".join([m.content or "" for m in messages]).lower()
         last_msg = messages[-1].content.lower() if (messages and messages[-1].content) else ""
@@ -239,7 +309,7 @@ class OrchestratorAgent(ToolUsingAgent):
                         return "local"  # Summarize locally
                     break
         
-        # Tier 2: Tool-required tasks need Cloud reasoning
+        # Tier 2: Tool-required tasks need Cloud reasoning (only if cloud available)
         tool_keywords = [
             "โรงแรม", "hotel", "booking", "จอง", "ค้นหา", "ราคา", "price",
             "research", "paper", "amazon", "browse", "เปิดเว็บ",
@@ -252,7 +322,7 @@ class OrchestratorAgent(ToolUsingAgent):
         if len(last_msg) < 100:
             return "local"
         
-        # Default: Cloud (better safe than sorry)
+        # Default: Cloud only if keys exist, else local
         return "cloud"
 
     # ------------------------------------------------------------------
@@ -896,6 +966,20 @@ class OrchestratorAgent(ToolUsingAgent):
                 return "ACCEPT (Screenshot tool failed)"
 
             b64_img = res.metadata.get("screenshot_base64")
+            if not b64_img and res.metadata.get("screenshot_path"):
+                import base64
+                path = res.metadata.get("screenshot_path")
+                if path.startswith("file://"):
+                    if path.startswith("file:///"):
+                        path = path[8:]
+                    else:
+                        path = path[7:]
+                try:
+                    with open(path, "rb") as f:
+                        b64_img = base64.b64encode(f.read()).decode("utf-8")
+                except Exception as e:
+                    print(f"[⚠️ VISUAL AUDIT ERROR] Failed to read screenshot file: {e}")
+
             if not b64_img:
                 return "ACCEPT (No image data captured)"
 

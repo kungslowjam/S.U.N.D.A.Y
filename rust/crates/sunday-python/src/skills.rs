@@ -39,6 +39,36 @@ impl PySkillManifest {
         self.inner.required_capabilities.clone()
     }
 
+    #[getter]
+    fn tags(&self) -> Vec<String> {
+        self.inner.tags.clone()
+    }
+
+    #[getter]
+    fn depends(&self) -> Vec<String> {
+        self.inner.depends.clone()
+    }
+
+    #[getter]
+    fn user_invocable(&self) -> bool {
+        self.inner.user_invocable
+    }
+
+    #[getter]
+    fn disable_model_invocation(&self) -> bool {
+        self.inner.disable_model_invocation
+    }
+
+    #[getter]
+    fn markdown_content(&self) -> &str {
+        &self.inner.markdown_content
+    }
+
+    #[getter]
+    fn metadata_json(&self) -> String {
+        serde_json::to_string(&self.inner.metadata).unwrap_or_else(|_| "{}".to_string())
+    }
+
     fn to_json(&self) -> String {
         serde_json::to_string(&self.inner).unwrap_or_default()
     }
@@ -59,6 +89,13 @@ impl PySkillManifest {
 #[pyfunction]
 pub fn load_skill(toml_str: &str) -> PyResult<PySkillManifest> {
     let manifest = sunday_skills::load_skill(toml_str)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
+    Ok(PySkillManifest { inner: manifest })
+}
+
+#[pyfunction]
+pub fn parse_skill_markdown(raw: &str) -> PyResult<PySkillManifest> {
+    let manifest = sunday_skills::parser::parse_skill_markdown(raw)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
     Ok(PySkillManifest { inner: manifest })
 }

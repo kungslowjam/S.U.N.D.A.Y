@@ -1,7 +1,5 @@
 use wasmtime::*;
 use wasi_common::sync::WasiCtxBuilder;
-use std::sync::Arc;
-use serde_json::Value;
 
 /// Secure WebAssembly Sandbox for untrusted code execution.
 pub struct Sandbox {
@@ -31,8 +29,8 @@ impl Sandbox {
         let mut store = Store::new(&self.engine, wasi);
         store.set_fuel(fuel_limit)?;
 
-        let linker = Linker::new(&self.engine);
-        wasi_common::sync::add_to_linker(&linker, |s| s)?;
+        let mut linker = Linker::new(&self.engine);
+        wasi_common::sync::add_to_linker(&mut linker, |s| s)?;
 
         let instance = linker.instantiate(&mut store, &module)?;
         let start = instance.get_typed_func::<(), ()>(&mut store, "_start")?;
@@ -56,13 +54,13 @@ pub struct NativeSandbox {
 #[pymethods]
 impl NativeSandbox {
     #[new]
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self { inner: Sandbox::new() }
     }
 
     /// Run a WASI-compliant Wasm binary with a specified fuel (CPU) limit.
     #[pyo3(signature = (wasm_bytes, fuel_limit=1000000))]
-    fn run_wasm(&self, wasm_bytes: Vec<u8>, fuel_limit: u64) -> PyResult<String> {
+    pub fn run_wasm(&self, wasm_bytes: Vec<u8>, fuel_limit: u64) -> PyResult<String> {
         self.inner.run_module(&wasm_bytes, fuel_limit)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }

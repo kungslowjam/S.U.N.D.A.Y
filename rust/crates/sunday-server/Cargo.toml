@@ -14,6 +14,7 @@ sunday-memory = { path = "../sunday-memory" }
 sunday-sessions = { path = "../sunday-sessions" }
 sunday-skills = { path = "../sunday-skills" }
 sunday-workflow = { path = "../sunday-workflow" }
+sunday-channels = { path = "../sunday-channels" }
 axum = { version = "0.7", features = ["ws", "multipart"] }
 tower = { version = "0.5", features = ["full"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "trace", "set-header"] }

@@ -35,7 +35,7 @@ impl BootOrchestrator {
         // Phase 1: Start AI Engine (llama-server)
         if !Self::is_port_in_use(llama_port) {
             tracing::info!("🧠 Starting AI engine on port {}...", llama_port);
-            self.start_llama_server(llama_port, model_path)?;
+            self.start_llama_server(llama_port, model_path, None)?;
             if !Self::wait_for_port(llama_port, 60).await {
                 return Err("AI engine failed to start".into());
             }
@@ -91,6 +91,7 @@ impl BootOrchestrator {
         &mut self,
         port: u16,
         model_path: Option<PathBuf>,
+        gpu_layers: Option<u32>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let project_root = PathBuf::from(".");
         let llama_exe = if self.is_windows {
@@ -103,12 +104,23 @@ impl BootOrchestrator {
             project_root.join("llama-cpp/models/Qwen3.5-9B-DeepSeek-V4-Flash-Q4_K_S.gguf")
         });
 
+        let ngl = gpu_layers.unwrap_or_else(|| {
+            std::env::var("SUNDAY_GPU_LAYERS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(35)
+        });
+        let parallel = std::env::var("SUNDAY_HARNESS_PARALLEL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1);
+
         let mut cmd = Command::new(&llama_exe);
         cmd.arg("-m").arg(&model)
             .arg("--port").arg(port.to_string())
-            .arg("-ngl").arg("99")
+            .arg("-ngl").arg(ngl.to_string())
             .arg("-c").arg("32768")
-            .arg("-np").arg("4")
+            .arg("-np").arg(parallel.to_string())
             .arg("--host").arg("127.0.0.1")
             .env("SUNDAY_HARNESS_MODE", "1")
             .stdout(Stdio::piped())

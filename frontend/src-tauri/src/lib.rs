@@ -6,6 +6,12 @@ use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 use tokio::sync::Mutex;
 
+mod state;
+use state::AppState;
+use sunday_engine::{Engine, ollama::OllamaEngine, native::NativeLlamaEngine};
+use sunday_engine::rig_adapter::RigModelAdapter;
+use sunday_core::events::EventBus;
+
 const OLLAMA_PORT: u16 = 11434;
 const SUNDAY_PORT: u16 = 8000;
 
@@ -208,7 +214,7 @@ fn find_project_root() -> Option<std::path::PathBuf> {
         let mut dir = exe.parent().map(|p| p.to_path_buf());
         for _ in 0..8 {
             if let Some(ref d) = dir {
-                if d.join("pyproject.toml").exists() {
+                if d.join("pyproject.toml").exists() || d.join("llama-cpp").exists() || d.join("rust").exists() {
                     return Some(d.clone());
                 }
                 dir = d.parent().map(|p| p.to_path_buf());
@@ -409,75 +415,178 @@ async fn pull_model(model: &str) -> Result<(), String> {
 // Backend boot sequence (runs in background after app launch)
 // ---------------------------------------------------------------------------
 
-async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
-    // Phase 1: Start Ollama
-    {
-        let mut s = status.lock().await;
-        s.phase = "ollama".into();
-        s.detail = "Starting inference engine...".into();
-    }
+async fn boot_backend(app: tauri::AppHandle, backend: SharedBackend, status: SharedStatus) {
+    // Phase 0: Discovery - Look for Native GGUF models
+    let mut has_gguf = false;
+    let home = home_dir();
+    let global_model_dir = std::path::PathBuf::from(&home).join(".sunday").join("models");
+    let project_root = find_project_root().unwrap_or_default();
+    let local_model_dir = project_root.join("llama-cpp").join("models");
 
-    // Try the bundled sidecar first, fall back to system ollama
-    let ollama_child = {
-        let ollama_bin = resolve_bin("ollama");
-        let sidecar = tokio::process::Command::new(&ollama_bin)
-            .arg("serve")
-            .env("OLLAMA_HOST", format!("127.0.0.1:{}", OLLAMA_PORT))
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-        match sidecar {
-            Ok(child) => Some(child),
-            Err(_) => None,
+    let dirs = vec![local_model_dir, global_model_dir];
+    for dir in &dirs {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            if entries.flatten().any(|e| e.path().extension().and_then(|s| s.to_str()) == Some("gguf")) {
+                has_gguf = true;
+                break;
+            }
         }
-    };
-
-    if let Some(child) = ollama_child {
-        backend.lock().await.ollama = Some(ChildHandle { child });
     }
 
-    let ollama_url = format!("http://127.0.0.1:{}/api/tags", OLLAMA_PORT);
-    let ollama_ok = wait_for_url(&ollama_url, Duration::from_secs(30)).await;
-
-    if !ollama_ok {
+    if has_gguf {
         let mut s = status.lock().await;
-        s.error = Some("Could not start Ollama. Install it from https://ollama.com".into());
-        return;
-    }
+        s.phase = "native".into();
+        s.detail = "Found local GGUF models. Using Native llama.cpp engine.".into();
+        s.ollama_ready = true; // Pretend ready so we can skip Phase 1
+        drop(s);
 
-    {
-        let mut s = status.lock().await;
-        s.ollama_ready = true;
-        s.detail = "Inference engine ready.".into();
-    }
-
-    // Phase 2: Pull one small model (qwen3.5:2b) so the app can open fast.
-    // Remaining models are pulled in the background after the server starts.
-    {
-        let mut s = status.lock().await;
-        s.phase = "model".into();
-        s.detail = format!("Checking for {}...", STARTUP_MODEL);
-    }
-
-    if !ollama_has_model(STARTUP_MODEL).await {
-        {
-            let mut s = status.lock().await;
-            s.detail = format!("Downloading {}... (this may take a minute)", STARTUP_MODEL);
-        }
-        if let Err(e) = pull_model(STARTUP_MODEL).await {
-            // If the startup model fails, try the tiny fallback
-            eprintln!("Warning: failed to pull {}: {}", STARTUP_MODEL, e);
-            if !ollama_has_model(FALLBACK_MODEL).await {
-                let mut s = status.lock().await;
-                s.detail = format!("Downloading {}...", FALLBACK_MODEL);
-                drop(s);
-                if let Err(e2) = pull_model(FALLBACK_MODEL).await {
-                    let mut s = status.lock().await;
-                    s.error = Some(format!("Failed to download model: {}", e2));
-                    return;
+        // Find all GGUFs and sort by priority
+        let mut gguf_paths = Vec::new();
+        for dir in &dirs {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|s| s.to_str()) == Some("gguf") {
+                        gguf_paths.push(path);
+                    }
                 }
             }
         }
+
+        // Sort: Qwen > Gemma > Others
+        gguf_paths.sort_by(|a, b| {
+            let an = a.file_name().unwrap().to_str().unwrap().to_lowercase();
+            let bn = b.file_name().unwrap().to_str().unwrap().to_lowercase();
+            let ap = if an.contains("qwen") { 0 } else if an.contains("gemma") { 1 } else { 2 };
+            let bp = if bn.contains("qwen") { 0 } else if bn.contains("gemma") { 1 } else { 2 };
+            ap.cmp(&bp)
+        });
+
+        let app_handle = app.clone();
+        let status_clone = status.clone();
+        
+        tokio::spawn(async move {
+            let mut inner_success = false;
+            for path in gguf_paths {
+                let path_str = path.to_str().unwrap().to_string();
+                let file_name = path.file_name().unwrap().to_str().unwrap().to_string();
+                
+                {
+                    let mut s = status_clone.lock().await;
+                    s.detail = format!("Background loading model: {}...", file_name);
+                }
+
+                // Run the heavy constructor in a blocking thread to avoid locking the executor
+                let path_clone = path_str.clone();
+                let engine_res = tokio::task::spawn_blocking(move || {
+                    NativeLlamaEngine::new(&path_clone)
+                }).await;
+
+                if let Ok(Ok(engine)) = engine_res {
+                    let state = app_handle.state::<AppState>();
+                    {
+                        let mut engine_lock = state.engine.write().await;
+                        *engine_lock = Arc::new(Engine::Native(engine));
+                    }
+                    
+                    {
+                        let mut model_lock = state.model.write().await;
+                        *model_lock = file_name.clone();
+                    }
+                    
+                    {
+                        let mut s = status_clone.lock().await;
+                        s.model_ready = true;
+                        s.detail = format!("Native model ready: {}", file_name);
+                    }
+                    inner_success = true;
+                    break;
+                } else {
+                    eprintln!("Warning: failed to load background model {}", file_name);
+                }
+            }
+            
+            if !inner_success {
+                let mut s = status_clone.lock().await;
+                s.detail = "No compatible GGUF found for background loading.".into();
+            }
+        });
+
+        // Optimistically continue to the next phase without waiting for the engine
+        has_gguf = true; 
+    } else {
+        // Phase 1: Start Ollama (Legacy/Fallback)
+        {
+            let mut s = status.lock().await;
+            s.phase = "ollama".into();
+            s.detail = "No GGUF found. Starting Ollama fallback...".into();
+        }
+
+        // Try the bundled sidecar first, fall back to system ollama
+        let ollama_child = {
+            let ollama_bin = resolve_bin("ollama");
+            let sidecar = tokio::process::Command::new(&ollama_bin)
+                .arg("serve")
+                .env("OLLAMA_HOST", format!("127.0.0.1:{}", OLLAMA_PORT))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn();
+            match sidecar {
+                Ok(child) => Some(child),
+                Err(_) => None,
+            }
+        };
+
+        if let Some(child) = ollama_child {
+            backend.lock().await.ollama = Some(ChildHandle { child });
+        }
+
+        let ollama_url = format!("http://127.0.0.1:{}/api/tags", OLLAMA_PORT);
+        let ollama_ok = wait_for_url(&ollama_url, Duration::from_secs(30)).await;
+
+        if !ollama_ok {
+            let mut s = status.lock().await;
+            s.error = Some("Could not start Ollama and no GGUF found in ~/.sunday/models. Install Ollama or add a .gguf file.".into());
+            return;
+        }
+
+        {
+            let mut s = status.lock().await;
+            s.ollama_ready = true;
+            s.detail = "Inference engine ready.".into();
+        }
+    }
+
+    // Phase 2: Pull/Check model
+    if !has_gguf {
+        let mut s = status.lock().await;
+        s.phase = "model".into();
+        s.detail = format!("Checking for {}...", STARTUP_MODEL);
+        drop(s);
+
+        if !ollama_has_model(STARTUP_MODEL).await {
+            {
+                let mut s = status.lock().await;
+                s.detail = format!("Downloading {}... (this may take a minute)", STARTUP_MODEL);
+            }
+            if let Err(e) = pull_model(STARTUP_MODEL).await {
+                // If the startup model fails, try the tiny fallback
+                eprintln!("Warning: failed to pull {}: {}", STARTUP_MODEL, e);
+                if !ollama_has_model(FALLBACK_MODEL).await {
+                    let mut s = status.lock().await;
+                    s.detail = format!("Downloading {}...", FALLBACK_MODEL);
+                    drop(s);
+                    if let Err(e2) = pull_model(FALLBACK_MODEL).await {
+                        let mut s = status.lock().await;
+                        s.error = Some(format!("Failed to download model: {}", e2));
+                        return;
+                    }
+                }
+            }
+        }
+    } else {
+        let mut s = status.lock().await;
+        s.model_ready = true;
     }
 
     {
@@ -631,35 +740,26 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
         }
     }
 
-    // Start with STARTUP_MODEL (just pulled) or preferred if already available.
-    let pref = preferred_model();
-    let startup_model = if ollama_has_model(pref).await {
-        pref
-    } else if ollama_has_model(STARTUP_MODEL).await {
-        STARTUP_MODEL
+    // Start with the model from AppState if available (Native), otherwise Ollama
+    let state = app.state::<AppState>();
+    let active_model = state.model.read().await.clone();
+    let startup_model = if !active_model.is_empty() && !active_model.contains("qwen3.5:4b") {
+        active_model
     } else {
-        FALLBACK_MODEL
+        let pref = preferred_model();
+        if ollama_has_model(pref).await {
+            pref.to_string()
+        } else if ollama_has_model(STARTUP_MODEL).await {
+            STARTUP_MODEL.to_string()
+        } else {
+            FALLBACK_MODEL.to_string()
+        }
     };
 
     let root = project_root.as_ref().unwrap();
 
-    // Install dependencies automatically (handles fresh clones)
-    {
-        let mut s = status.lock().await;
-        s.detail = "Installing dependencies...".into();
-    }
-    let _ = tokio::process::Command::new(&uv_bin)
-        .args([
-            "sync",
-            "--extra", "server",
-            "--extra", "inference-cloud",
-            "--extra", "inference-google",
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .current_dir(root)
-        .status()
-        .await;
+    // Optimistic start: we skip sync and try to start the server immediately.
+    // If it fails, we will catch it below and try a sync + retry.
 
     {
         let mut s = status.lock().await;
@@ -670,21 +770,28 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
         );
     }
 
+    let mut args = vec![
+        "run".to_string(),
+        "sunday".to_string(),
+        "serve".to_string(),
+        "--port".to_string(),
+        SUNDAY_PORT.to_string(),
+        "--model".to_string(),
+        startup_model.clone(),
+        "--agent".to_string(),
+        "simple".to_string(),
+    ];
+
+    if has_gguf {
+        args.push("--engine".to_string());
+        args.push("native".to_string());
+    }
+
     let mut cmd = tokio::process::Command::new(&uv_bin);
-    cmd.args([
-        "run",
-        "sunday",
-        "serve",
-        "--port",
-        &SUNDAY_PORT.to_string(),
-        "--model",
-        startup_model,
-        "--agent",
-        "simple",
-    ])
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::piped())
-    .current_dir(root);
+    cmd.args(&args)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .current_dir(root);
 
     // Inject cloud API keys from ~/.sunday/cloud-keys.env
     for (key, value) in read_cloud_keys() {
@@ -712,7 +819,64 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
     let server_ok = wait_for_url(&server_url, Duration::from_secs(600)).await;
 
     if !server_ok {
-        // Try to read stderr from the failed process for a useful error
+        // Phase 3.5: Failed? Maybe we need a sync.
+        {
+            let mut s = status.lock().await;
+            s.detail = "Server failed to start. Attempting to repair dependencies...".into();
+        }
+        
+        let _ = tokio::process::Command::new(&uv_bin)
+            .args([
+                "sync",
+                "--extra", "server",
+                "--extra", "inference-cloud",
+                "--extra", "inference-google",
+            ])
+            .current_dir(root)
+            .status()
+            .await;
+
+        // Retry starting the server
+        let mut args = vec![
+            "run".to_string(),
+            "sunday".to_string(),
+            "serve".to_string(),
+            "--port".to_string(),
+            SUNDAY_PORT.to_string(),
+            "--model".to_string(),
+            startup_model.clone(),
+            "--agent".to_string(),
+            "simple".to_string(),
+        ];
+
+        if has_gguf {
+            args.push("--engine".to_string());
+            args.push("native".to_string());
+        }
+
+        let mut cmd = tokio::process::Command::new(&uv_bin);
+        cmd.args(&args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .current_dir(root);
+        
+        for (key, value) in read_cloud_keys() {
+            cmd.env(&key, &value);
+        }
+        
+        if let Ok(child) = cmd.spawn() {
+            backend.lock().await.sunday = Some(ChildHandle { child });
+            if wait_for_url(&server_url, Duration::from_secs(600)).await {
+                // Success on retry!
+                let mut s = status.lock().await;
+                s.server_ready = true;
+                s.phase = "ready".into();
+                s.detail = "All systems ready (repaired).".into();
+                return;
+            }
+        }
+
+        // Still failed? 
         let mut stderr_msg = String::new();
         {
             let mut mgr = backend.lock().await;
@@ -727,16 +891,9 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
             }
         }
         let detail = if stderr_msg.is_empty() {
-            format!(
-                "Jarvis server did not start. Check that:\n\
-                 1. uv is installed ({})\n\
-                 2. The SUNDAY repo is at {}\n\
-                 3. Run 'uv sync' in that directory",
-                uv_bin,
-                root.display(),
-            )
+            "Jarvis server did not start even after repair.".into()
         } else {
-            format!("Server failed to start: {}", stderr_msg.trim())
+            format!("Server failed: {}", stderr_msg.trim())
         };
         let mut s = status.lock().await;
         s.error = Some(detail);
@@ -785,13 +942,95 @@ fn get_api_base() -> String {
 
 #[tauri::command]
 async fn start_backend(
+    app: tauri::AppHandle,
     backend: tauri::State<'_, SharedBackend>,
     status: tauri::State<'_, SharedStatus>,
 ) -> Result<(), String> {
     let b = backend.inner().clone();
     let s = status.inner().clone();
-    tauri::async_runtime::spawn(boot_backend(b, s));
+    tauri::async_runtime::spawn(boot_backend(app, b, s));
     Ok(())
+}
+
+#[tauri::command]
+async fn run_workflow(
+    app: tauri::AppHandle,
+    graph_json: String,
+    initial_input: String,
+) -> Result<String, String> {
+    use tauri::Emitter;
+    use sunday_workflow::{RawGraph, WorkflowGraph};
+    
+    use sunday_agents::{orchestrator::OrchestratorAgent, traits::OjAgent};
+    use sunday_tools::executor::ToolExecutor;
+    use std::sync::Arc;
+    use crate::state::AppState;
+
+    let raw: RawGraph = serde_json::from_str(&graph_json)
+        .map_err(|e| format!("Invalid graph JSON: {}", e))?;
+    
+    let graph = WorkflowGraph::from_raw("dynamic-workflow".to_string(), raw)
+        .map_err(|e| format!("Graph build failed: {}", e))?;
+
+    let state = app.state::<AppState>();
+    let engine = state.engine.read().await.clone();
+    let mut executor = ToolExecutor::new(None, None, Some(state.bus.clone()));
+    
+    // --- REGISTER ALL TOOLS ---
+    use sunday_tools::builtin::*;
+    use sunday_tools::browser_native::NativeBrowser;
+    
+    // Initialize Browser (Shared Session)
+    let _browser = Arc::new(NativeBrowser::new(true).await.map_err(|e| format!("Browser init failed: {}", e))?);
+    
+    executor.register(BuiltinTool::Calculator(CalculatorTool));
+    executor.register(BuiltinTool::FileRead(FileReadTool));
+    executor.register(BuiltinTool::FileWrite(FileWriteTool));
+    executor.register(BuiltinTool::ShellExec(ShellExecTool));
+    executor.register(BuiltinTool::HttpRequest(HttpRequestTool));
+    executor.register(BuiltinTool::GitStatus(GitStatusTool));
+    executor.register(BuiltinTool::GitDiff(GitDiffTool));
+    executor.register(BuiltinTool::GitLog(GitLogTool));
+    executor.register(BuiltinTool::CryptoPrice(CryptoPriceTool));
+    executor.register(BuiltinTool::Think(ThinkTool));
+    
+    // TODO: Register actual browser tools (click, navigate, search)
+    // These need to be wrapped in the executor
+    
+    let executor = Arc::new(executor);
+    
+    // Wrap the engine in a RigModelAdapter so it implements CompletionModel
+    let model_id = state.model.read().await.clone();
+    let rig_model = RigModelAdapter::new(engine, model_id);
+    
+    let agent = OrchestratorAgent::new(
+        rig_model,
+        "You are an expert mission controller. Execute the following workflow steps.",
+        executor,
+        20,
+    );
+
+    let handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let input = format!("Execute mission: {}. Workflow steps: {:?}", initial_input, graph.nodes);
+        match agent.run(&input, None).await {
+            Ok(res) => {
+                let _ = handle.emit("workflow-finished", serde_json::json!({
+                    "status": "success",
+                    "output": res.content,
+                    "turns": res.turns
+                }));
+            }
+            Err(e) => {
+                let _ = handle.emit("workflow-finished", serde_json::json!({
+                    "status": "error",
+                    "error": e.to_string()
+                }));
+            }
+        }
+    });
+
+    Ok("Mission started".to_string())
 }
 
 #[tauri::command]
@@ -1582,9 +1821,24 @@ async fn hide_overlay() -> Result<(), String> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// App entry point
-// ---------------------------------------------------------------------------
+fn percent_decode(s: &str) -> String {
+    let mut bytes = Vec::new();
+    let mut chars = s.as_bytes().iter();
+    while let Some(&b) = chars.next() {
+        if b == b'%' {
+            if let (Some(&h), Some(&l)) = (chars.next(), chars.next()) {
+                if let Ok(hex) = String::from_utf8(vec![*h, *l]) {
+                    if let Ok(val) = u8::from_str_radix(&hex, 16) {
+                        bytes.push(val);
+                        continue;
+                    }
+                }
+            }
+        }
+        bytes.push(b);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -1594,9 +1848,57 @@ pub fn run() {
     let boot_backend_ref = backend.clone();
     let boot_status_ref = status.clone();
 
+    let bus = Arc::new(EventBus::new(true));
+    let initial_engine = Engine::Ollama(OllamaEngine::new(&format!("http://127.0.0.1:{}", OLLAMA_PORT), 120.0));
+    let app_state = AppState::new(initial_engine, bus, STARTUP_MODEL.into());
+
     tauri::Builder::default()
+        .register_uri_scheme_protocol("sunday-img", |app_handle, request| {
+            let path_str = request.uri().path();
+            let decoded = percent_decode(path_str);
+
+            // On Windows, the path starts with "/C:/" or "/D:/". Strip the leading slash.
+            let file_path = if decoded.starts_with('/') && decoded.chars().nth(2) == Some(':') {
+                std::path::PathBuf::from(&decoded[1..])
+            } else {
+                std::path::PathBuf::from(&decoded)
+            };
+
+            // Security check: ensure the file exists and is indeed inside the .sunday directory!
+            let mut is_allowed = false;
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_default();
+            if !home.is_empty() {
+                let sunday_dir = std::path::PathBuf::from(home).join(".sunday");
+                if file_path.starts_with(&sunday_dir) {
+                    is_allowed = true;
+                }
+            }
+
+            if is_allowed && file_path.exists() {
+                if let Ok(data) = std::fs::read(&file_path) {
+                    let content_type = if file_path.extension().map_or(false, |ext| ext == "png") {
+                        "image/png"
+                    } else {
+                        "image/jpeg"
+                    };
+                    return tauri::http::Response::builder()
+                        .header("Content-Type", content_type)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(data)
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>);
+                }
+            }
+
+            tauri::http::Response::builder()
+                .status(404)
+                .body(Vec::new())
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+        })
         .manage(backend.clone())
         .manage(status.clone())
+        .manage(app_state)
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -1675,7 +1977,7 @@ pub fn run() {
             }
 
             // Auto-start backend services on launch
-            tauri::async_runtime::spawn(boot_backend(boot_backend_ref, boot_status_ref));
+            tauri::async_runtime::spawn(boot_backend(app.handle().clone(), boot_backend_ref, boot_status_ref));
 
             Ok(())
         })
@@ -1707,6 +2009,7 @@ pub fn run() {
             toggle_overlay,
             hide_overlay,
             get_overlay_conversation,
+            run_workflow,
         ])
         .build(tauri::generate_context!())
         .expect("error while building SUNDAY Desktop")

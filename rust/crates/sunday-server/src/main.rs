@@ -1,17 +1,15 @@
 //! SUNDAY HTTP API Server — Axum-based replacement for Python FastAPI.
 
-use axum::Router;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod app;
+mod memory_manager;
 mod middleware;
 mod routes;
 mod state;
 
 use app::create_app;
-use state::AppState;
 
 #[tokio::main]
 async fn main() {
@@ -23,19 +21,24 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let bind_host = std::env::var("SUNDAY_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+    // Load configuration from default path or environment override
+    let config = sunday_core::config::load_config(None).unwrap_or_default();
+
+    let bind_host = std::env::var("SUNDAY_HOST")
+        .unwrap_or_else(|_| config.server.host.clone());
     let bind_port = std::env::var("SUNDAY_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .unwrap_or(8000u16);
+        .unwrap_or(config.server.port as u16);
 
     let addr: SocketAddr = format!("{}:{}", bind_host, bind_port)
         .parse()
         .expect("Invalid bind address");
 
     tracing::info!("🚀 SUNDAY server starting on http://{}", addr);
+    tracing::info!("   Engine: {} | Model: {}", config.engine.default, config.intelligence.default_model);
 
-    let app = create_app().await;
+    let app = create_app(config).await;
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

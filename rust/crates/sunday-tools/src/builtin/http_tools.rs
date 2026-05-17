@@ -48,9 +48,10 @@ impl BaseTool for HttpRequestTool {
 
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 SUNDAY-Agent/1.0")
             .build()
             .map_err(|e| {
-                SUNDAYError::Io(std::io::Error::other(e.to_string()))
+                SUNDAYError::Io(std::io::Error::other(format!("Failed to build HTTP client: {}", e)))
             })?;
 
         let mut request = match method.as_str() {

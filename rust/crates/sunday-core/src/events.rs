@@ -29,6 +29,7 @@ pub enum EventType {
     AgentTickStart,
     AgentTickEnd,
     AgentTickError,
+    TelemetryRecord,
 }
 
 impl fmt::Display for EventType {
@@ -53,6 +54,7 @@ impl fmt::Display for EventType {
             Self::AgentTickStart => "agent_tick_start",
             Self::AgentTickEnd => "agent_tick_end",
             Self::AgentTickError => "agent_tick_error",
+            Self::TelemetryRecord => "telemetry_record",
         };
         write!(f, "{}", s)
     }
@@ -81,6 +83,7 @@ impl std::str::FromStr for EventType {
             "agent_tick_start" => Ok(Self::AgentTickStart),
             "agent_tick_end" => Ok(Self::AgentTickEnd),
             "agent_tick_error" => Ok(Self::AgentTickError),
+            "telemetry_record" => Ok(Self::TelemetryRecord),
             _ => Err(format!("Unknown event type: {}", s)),
         }
     }

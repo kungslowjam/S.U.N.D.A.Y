@@ -247,6 +247,15 @@ def build_llama_command(llama_exe: Path, model_path: Path,
 
 def run_automated_harness():
     """Run the full automated cold-start harness with cross-platform support."""
+    # --- Rust bridge: prefer Rust BootOrchestrator for process management ---
+    try:
+        import sunday_rust
+        _rust_boot = sunday_rust.BootOrchestrator()
+        _use_rust_boot = True
+    except ImportError:
+        _rust_boot = None
+        _use_rust_boot = False
+
     pm = CrossPlatformProcessManager()
     pm.cleanup_existing()
 
@@ -287,42 +296,46 @@ def run_automated_harness():
     os.environ.update(env_vars)
 
     try:
-        # 1. Start AI Engine (llama-server) if not running
-        if not is_port_in_use(8081):
-            print("[🧠] AI Engine is down. Starting llama-server...")
-            gpu_layers = int(os.environ.get("SUNDAY_GPU_LAYERS", "35"))
-            parallel_slots = int(os.environ.get("SUNDAY_HARNESS_PARALLEL", "1"))
+        if _use_rust_boot:
+            print("[🦀] Using Rust BootOrchestrator for cold-start...")
+            _rust_boot.cold_start(8081, 8000, 5173, str(model_path) if model_path.exists() else None)
+        else:
+            # 1. Start AI Engine (llama-server) if not running
+            if not is_port_in_use(8081):
+                print("[🧠] AI Engine is down. Starting llama-server...")
+                gpu_layers = int(os.environ.get("SUNDAY_GPU_LAYERS", "35"))
+                parallel_slots = int(os.environ.get("SUNDAY_HARNESS_PARALLEL", "1"))
 
-            if llama_exe.exists():
-                llama_cmd = build_llama_command(
-                    llama_exe, model_path,
-                    gpu_layers=gpu_layers,
-                    parallel_slots=parallel_slots
-                )
-                pm.start_process(llama_cmd, project_root / "llama-cpp", "AI-ENGINE")
-                print("       Waiting for AI to warm up...")
-                time.sleep(15)  # Engines take time to load weights
+                if llama_exe.exists():
+                    llama_cmd = build_llama_command(
+                        llama_exe, model_path,
+                        gpu_layers=gpu_layers,
+                        parallel_slots=parallel_slots
+                    )
+                    pm.start_process(llama_cmd, project_root / "llama-cpp", "AI-ENGINE")
+                    print("       Waiting for AI to warm up...")
+                    time.sleep(15)  # Engines take time to load weights
+                else:
+                    print(f"      [⚠️] llama-server not found at {llama_exe}. Skipping AI engine startup.")
             else:
-                print(f"      [⚠️] llama-server not found at {llama_exe}. Skipping AI engine startup.")
-        else:
-            print("[✅] AI Engine is already running.")
+                print("[✅] AI Engine is already running.")
 
-        # 2. Start Backend if not running
-        if not is_port_in_use(8000):
-            print("[⚡] Backend is down. Starting autonomous backend...")
-            backend_cmd = f'"{venv_python}" -m sunday.cli serve --engine multi --agent orchestrator --host 127.0.0.1 --port 8000'
-            pm.start_process(backend_cmd, project_root, "BACKEND", env=env_vars)
-            wait_for_backend(timeout=60)
-        else:
-            print("[✅] Backend is already running.")
+            # 2. Start Backend if not running
+            if not is_port_in_use(8000):
+                print("[⚡] Backend is down. Starting autonomous backend...")
+                backend_cmd = f'"{venv_python}" -m sunday.cli serve --engine multi --agent orchestrator --host 127.0.0.1 --port 8000'
+                pm.start_process(backend_cmd, project_root, "BACKEND", env=env_vars)
+                wait_for_backend(timeout=60)
+            else:
+                print("[✅] Backend is already running.")
 
-        # 3. Start Frontend if not running
-        if not is_port_in_use(5173):
-            print("[🌐] Frontend is down. Starting autonomous frontend (Vite)...")
-            pm.start_process("npm run dev -- --host 127.0.0.1", project_root / "frontend", "FRONTEND")
-            wait_for_frontend(timeout=30)
-        else:
-            print("[✅] Frontend is already running.")
+            # 3. Start Frontend if not running
+            if not is_port_in_use(5173):
+                print("[🌐] Frontend is down. Starting autonomous frontend (Vite)...")
+                pm.start_process("npm run dev -- --host 127.0.0.1", project_root / "frontend", "FRONTEND")
+                wait_for_frontend(timeout=30)
+            else:
+                print("[✅] Frontend is already running.")
 
         print("\n[🧪] Everything ready. Starting E2E Browser Tests...")
 

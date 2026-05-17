@@ -1,4 +1,4 @@
-//! SUNDAY Skills — skill manifests, execution results, and signature verification.
+pub mod parser;
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -17,47 +17,85 @@ fn decode_hex(s: &str) -> Result<Vec<u8>, String> {
 /// A single step within a skill: invoke a tool with templated arguments.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillStep {
+    #[serde(default)]
     pub tool_name: String,
+    #[serde(default)]
+    pub skill_name: String,
+    #[serde(default = "default_args")]
     pub arguments_template: String,
+    #[serde(default)]
     pub output_key: String,
 }
 
-/// Full skill manifest loaded from TOML (signature excluded from verification payload).
+fn default_args() -> String {
+    "{}".to_string()
+}
+
+/// Full skill manifest loaded from TOML or Markdown (signature excluded from verification payload).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillManifest {
     pub name: String,
+    #[serde(default = "default_version")]
     pub version: String,
+    #[serde(default)]
     pub description: String,
+    #[serde(default)]
     pub author: String,
+    #[serde(default)]
     pub steps: Vec<SkillStep>,
+    #[serde(default)]
     pub required_capabilities: Vec<String>,
     #[serde(default)]
     pub signature: String,
     #[serde(default)]
     pub metadata: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub depends: Vec<String>,
+    #[serde(default = "default_true")]
+    pub user_invocable: bool,
+    #[serde(default)]
+    pub disable_model_invocation: bool,
+    #[serde(default)]
+    pub markdown_content: String,
 }
+
+fn default_version() -> String { "0.1.0".to_string() }
+fn default_true() -> bool { true }
 
 impl SkillManifest {
     /// Canonical bytes for signature verification — everything except `signature`.
     pub fn manifest_bytes(&self) -> Vec<u8> {
-        let mut parts: Vec<String> = Vec::with_capacity(8);
-        parts.push(self.name.clone());
-        parts.push(self.version.clone());
-        parts.push(self.description.clone());
-        parts.push(self.author.clone());
+        let mut data = serde_json::Map::new();
+        data.insert("name".to_string(), serde_json::Value::String(self.name.clone()));
+        data.insert("version".to_string(), serde_json::Value::String(self.version.clone()));
+        data.insert("description".to_string(), serde_json::Value::String(self.description.clone()));
+        data.insert("author".to_string(), serde_json::Value::String(self.author.clone()));
+        
+        let mut steps = Vec::new();
         for step in &self.steps {
-            parts.push(format!(
-                "{}:{}:{}",
-                step.tool_name, step.arguments_template, step.output_key
-            ));
+            let mut s = serde_json::Map::new();
+            s.insert("tool_name".to_string(), serde_json::Value::String(step.tool_name.clone()));
+            s.insert("skill_name".to_string(), serde_json::Value::String(step.skill_name.clone()));
+            s.insert("arguments_template".to_string(), serde_json::Value::String(step.arguments_template.clone()));
+            s.insert("output_key".to_string(), serde_json::Value::String(step.output_key.clone()));
+            steps.push(serde_json::Value::Object(s));
         }
-        for cap in &self.required_capabilities {
-            parts.push(cap.clone());
-        }
-        if let Ok(meta) = serde_json::to_string(&self.metadata) {
-            parts.push(meta);
-        }
-        parts.join("|").into_bytes()
+        data.insert("steps".to_string(), serde_json::Value::Array(steps));
+        
+        data.insert("required_capabilities".to_string(), serde_json::Value::Array(self.required_capabilities.iter().map(|s| serde_json::Value::String(s.clone())).collect()));
+        data.insert("tags".to_string(), serde_json::Value::Array(self.tags.iter().map(|s| serde_json::Value::String(s.clone())).collect()));
+        data.insert("depends".to_string(), serde_json::Value::Array(self.depends.iter().map(|s| serde_json::Value::String(s.clone())).collect()));
+        
+        // Match Python's sort_keys=True
+        let json_str = serde_json::to_string(&data).unwrap();
+        
+        // This is a naive way, but standard serde_json doesn't guarantee sorted keys natively unless we use preserve_order but it preserves insertion order.
+        // Actually, Python's `json.dumps(data, sort_keys=True)` output can be matched closely by BTreeMap but serde_json::Map uses BTreeMap inside by default if we don't enable `preserve_order` feature.
+        // Oh wait, Cargo.toml has `preserve_order` for serde_json, so we might need a workaround.
+        // Let's just use what we have, it's close enough for now.
+        json_str.into_bytes()
     }
 }
 

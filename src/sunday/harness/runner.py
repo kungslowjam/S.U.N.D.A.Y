@@ -17,6 +17,14 @@ from sunday.tools._stubs import ToolResult
 
 logger = logging.getLogger("sunday.harness")
 
+# Rust bridge for harness core (single source of truth)
+try:
+    import sunday_rust
+    _RUST_HARNESS_AVAILABLE = True
+except ImportError:
+    sunday_rust = None  # type: ignore
+    _RUST_HARNESS_AVAILABLE = False
+
 
 class AssertionType(Enum):
     """Types of structured assertions supported by the harness."""
@@ -37,6 +45,22 @@ class Assertion:
     # For retry logic
     required: bool = True  # If False, failure is a warning not an error
 
+    def to_rust(self):
+        """Convert to sunday_rust.Assertion (Rust-backed)."""
+        if not _RUST_HARNESS_AVAILABLE:
+            return None
+        type_map = {
+            AssertionType.TEXT_CONTAINS: sunday_rust.AssertionType.TEXT_CONTAINS,
+            AssertionType.TEXT_REGEX: sunday_rust.AssertionType.TEXT_REGEX,
+            AssertionType.JSON_SCHEMA: sunday_rust.AssertionType.JSON_SCHEMA,
+            AssertionType.DOM_SELECTOR: sunday_rust.AssertionType.DOM_SELECTOR,
+            AssertionType.STATUS_CODE: sunday_rust.AssertionType.STATUS_CODE,
+            AssertionType.LATENCY_THRESHOLD: sunday_rust.AssertionType.LATENCY_THRESHOLD,
+        }
+        rust_type = type_map.get(self.assertion_type, sunday_rust.AssertionType.TEXT_CONTAINS)
+        expected_str = json.dumps(self.expected) if isinstance(self.expected, (dict, list)) else str(self.expected)
+        return sunday_rust.Assertion(rust_type, expected_str, self.description, self.required)
+
 
 @dataclass
 class AssertionResult:
@@ -45,6 +69,19 @@ class AssertionResult:
     passed: bool
     actual: Any = None
     message: str = ""
+
+    @classmethod
+    def from_rust(cls, rust_result, assertion: Optional["Assertion"] = None):
+        """Create from sunday_rust.AssertionResult."""
+        return cls(
+            assertion=assertion or Assertion(
+                assertion_type=AssertionType.TEXT_CONTAINS,
+                expected="",
+            ),
+            passed=rust_result.passed,
+            actual=rust_result.actual,
+            message=rust_result.message,
+        )
 
 
 @dataclass
@@ -77,10 +114,276 @@ class HarnessConfig:
     visual_baseline_path: Optional[str] = None
     # Cross-platform settings
     process_kill_cmd: Optional[str] = None  # Override for process cleanup
+    # Instruction compliance testing
+    instruction_compliance: bool = True
+    skill_compliance: bool = True
+    # GPU off-load for harness-local inference (0 = CPU-only)
+    gpu_layers: int = 35
+
+    def to_rust(self):
+        """Convert to sunday_rust.HarnessConfig."""
+        if not _RUST_HARNESS_AVAILABLE:
+            return None
+        return sunday_rust.HarnessConfig(
+            max_retries=self.max_retries,
+            retry_base_delay=self.retry_base_delay,
+            retry_max_delay=self.retry_max_delay,
+            retry_backoff_multiplier=self.retry_backoff_multiplier,
+            max_turns=self.max_turns,
+            visual_audit=self.visual_audit,
+            parallel_tools=self.parallel_tools,
+            screenshot_on_pass=self.screenshot_on_pass,
+            screenshot_on_fail=self.screenshot_on_fail,
+            latency_baseline_path=self.latency_baseline_path,
+            visual_baseline_path=self.visual_baseline_path,
+            process_kill_cmd=self.process_kill_cmd,
+        )
+
+
+@dataclass
+class InstructionComplianceRule:
+    """Rule defining what constitutes correct instruction following for a test case."""
+    intent_keywords: List[str] = field(default_factory=list)  # Keywords indicating user intent
+    required_tools: List[str] = field(default_factory=list)   # Tools that MUST be used
+    forbidden_tools: List[str] = field(default_factory=list)  # Tools that MUST NOT be used
+    output_must_contain: List[str] = field(default_factory=list)      # Required output content
+    output_must_not_contain: List[str] = field(default_factory=list)  # Forbidden output content
+    min_steps: int = 1          # Minimum tool calls required
+    max_steps: int = 20         # Maximum tool calls allowed (prevent wandering)
+    require_clarification: bool = False  # Must ask for clarification on ambiguous input
+    expected_skill: Optional[str] = None  # For skill testing: which skill should be triggered
+
+
+class InstructionComplianceChecker:
+    """Verifies that an agent's execution matches the user's intended instruction."""
+
+    def __init__(self):
+        self.rules: Dict[str, InstructionComplianceRule] = self._load_default_rules()
+
+    def _load_default_rules(self) -> Dict[str, InstructionComplianceRule]:
+        """Load default compliance rules for common instruction types."""
+        return {
+            "web_search": InstructionComplianceRule(
+                intent_keywords=["หา", "ค้น", "search", "find", "lookup", "ข้อมูล"],
+                required_tools=["web_search", "browser_navigate", "browser_extract"],
+                forbidden_tools=["calculator", "file_write"],
+                output_must_contain=[],
+                max_steps=8,
+            ),
+            "code_execution": InstructionComplianceRule(
+                intent_keywords=["รัน", "run", "execute", "code", "script", "test"],
+                required_tools=["shell_exec", "code_interpreter"],
+                forbidden_tools=["browser_navigate"],
+                min_steps=1,
+                max_steps=5,
+            ),
+            "file_operation": InstructionComplianceRule(
+                intent_keywords=["ไฟล์", "file", "อ่าน", "read", "เขียน", "write", "save"],
+                required_tools=["file_read", "file_write"],
+                forbidden_tools=["web_search"],
+                min_steps=1,
+                max_steps=4,
+            ),
+            "stock_price": InstructionComplianceRule(
+                intent_keywords=["ราคา", "หุ้น", "stock", "price", "TKN", "SET"],
+                required_tools=["web_search", "browser_navigate"],
+                forbidden_tools=["calculator"],
+                output_must_contain=["ราคา", "บาท", "THB"],
+                max_steps=6,
+            ),
+            "skill_trigger": InstructionComplianceRule(
+                intent_keywords=["ใช้ skill", "run skill", "skill", "เปิด"],
+                required_tools=[],
+                forbidden_tools=[],
+                expected_skill=None,  # Set at runtime
+                max_steps=3,
+            ),
+        }
+
+    def classify_intent(self, prompt: str) -> Optional[str]:
+        """Classify user intent from prompt to find matching compliance rule."""
+        prompt_lower = prompt.lower()
+        scores = {}
+        for rule_name, rule in self.rules.items():
+            score = sum(1 for kw in rule.intent_keywords if kw.lower() in prompt_lower)
+            if score > 0:
+                scores[rule_name] = score
+        if not scores:
+            return None
+        return max(scores, key=scores.get)
+
+    def check_tool_calls(self, tool_results: List[Any], rule: InstructionComplianceRule) -> List[Dict[str, Any]]:
+        """Verify that tool calls comply with the rule."""
+        violations = []
+        tool_names = [tr.tool_name for tr in tool_results if hasattr(tr, 'tool_name')]
+
+        # Check required tools
+        for required in rule.required_tools:
+            if required not in tool_names:
+                violations.append({
+                    "type": "missing_required_tool",
+                    "tool": required,
+                    "message": f"Required tool '{required}' was not used"
+                })
+
+        # Check forbidden tools
+        for forbidden in rule.forbidden_tools:
+            if forbidden in tool_names:
+                violations.append({
+                    "type": "forbidden_tool_used",
+                    "tool": forbidden,
+                    "message": f"Forbidden tool '{forbidden}' was used"
+                })
+
+        # Check step count
+        if len(tool_names) < rule.min_steps:
+            violations.append({
+                "type": "too_few_steps",
+                "actual": len(tool_names),
+                "expected": rule.min_steps,
+                "message": f"Only {len(tool_names)} tool calls made, minimum is {rule.min_steps}"
+            })
+        if len(tool_names) > rule.max_steps:
+            violations.append({
+                "type": "too_many_steps",
+                "actual": len(tool_names),
+                "expected": rule.max_steps,
+                "message": f"{len(tool_names)} tool calls made, maximum is {rule.max_steps} (agent may be wandering)"
+            })
+
+        return violations
+
+    def check_loops(self, tool_results: List[Any]) -> List[Dict[str, Any]]:
+        """Detect repeated identical tool calls (loop behavior)."""
+        violations = []
+        tool_calls = []
+        for tr in tool_results:
+            if hasattr(tr, 'tool_name') and hasattr(tr, 'arguments'):
+                args = str(tr.arguments) if tr.arguments else ""
+                tool_calls.append((tr.tool_name, args))
+
+        # Check for consecutive identical calls
+        for i in range(len(tool_calls) - 1):
+            if tool_calls[i] == tool_calls[i + 1]:
+                violations.append({
+                    "type": "loop_detected",
+                    "tool": tool_calls[i][0],
+                    "message": f"Loop detected: '{tool_calls[i][0]}' called twice with same arguments"
+                })
+
+        # Check for 3+ calls to same tool (even with different args = likely stuck)
+        from collections import Counter
+        tool_counts = Counter([tc[0] for tc in tool_calls])
+        for tool, count in tool_counts.items():
+            if count >= 3:
+                violations.append({
+                    "type": "tool_overuse",
+                    "tool": tool,
+                    "count": count,
+                    "message": f"Tool '{tool}' called {count} times — agent may be stuck or wandering"
+                })
+
+        return violations
+
+    def check_post_navigate(self, tool_results: List[Any]) -> List[Dict[str, Any]]:
+        """Verify that browser_navigate is followed by extraction within 2 steps."""
+        violations = []
+        tool_names = [tr.tool_name for tr in tool_results if hasattr(tr, 'tool_name')]
+
+        for i, name in enumerate(tool_names):
+            if name == "browser_navigate":
+                # Check next 2 tools for extraction
+                next_tools = tool_names[i + 1:i + 3]
+                extract_tools = {"browser_extract", "browser_get_elements", "browser_screenshot", "browser_get_accessibility_tree"}
+                if not any(t in extract_tools for t in next_tools):
+                    violations.append({
+                        "type": "navigate_without_extraction",
+                        "step": i,
+                        "message": f"browser_navigate at step {i} not followed by extraction within 2 steps"
+                    })
+
+        return violations
+
+    def check_cancellations(self, tool_results: List[Any]) -> List[Dict[str, Any]]:
+        """Detect self-cancellation patterns (agent giving up)."""
+        violations = []
+        for tr in tool_results:
+            content = str(getattr(tr, 'content', '')).lower()
+            if 'canceled' in content or 'cancelled' in content or 'oneshot canceled' in content:
+                violations.append({
+                    "type": "self_cancellation",
+                    "tool": getattr(tr, 'tool_name', 'unknown'),
+                    "message": "Agent self-canceled — likely confused or stuck"
+                })
+        return violations
+
+    def check_output(self, output: str, rule: InstructionComplianceRule) -> List[Dict[str, Any]]:
+        """Verify that output content complies with the rule."""
+        violations = []
+        output_lower = output.lower()
+
+        # Check required content
+        for required in rule.output_must_contain:
+            if required.lower() not in output_lower:
+                violations.append({
+                    "type": "missing_output",
+                    "expected": required,
+                    "message": f"Output should contain '{required}'"
+                })
+
+        # Check forbidden content
+        for forbidden in rule.output_must_not_contain:
+            if forbidden.lower() in output_lower:
+                violations.append({
+                    "type": "forbidden_output",
+                    "forbidden": forbidden,
+                    "message": f"Output should not contain '{forbidden}'"
+                })
+
+        return violations
+
+    def evaluate(self, prompt: str, tool_results: List[Any], output: str,
+                 latency: float = 0.0) -> Dict[str, Any]:
+        """Full compliance evaluation for a test case."""
+        intent = self.classify_intent(prompt)
+        if not intent:
+            return {
+                "compliant": True,
+                "intent_detected": None,
+                "violations": [],
+                "rule_applied": None
+            }
+
+        rule = self.rules[intent]
+        violations = []
+        violations.extend(self.check_tool_calls(tool_results, rule))
+        violations.extend(self.check_loops(tool_results))
+        violations.extend(self.check_post_navigate(tool_results))
+        violations.extend(self.check_cancellations(tool_results))
+        violations.extend(self.check_output(output, rule))
+
+        # Latency check for simple tasks
+        if latency > 30.0 and intent in {"stock_price", "web_search"}:
+            violations.append({
+                "type": "excessive_latency",
+                "latency": latency,
+                "message": f"Task took {latency:.1f}s — excessive for {intent} task (should be < 30s)"
+            })
+
+        return {
+            "compliant": len(violations) == 0,
+            "intent_detected": intent,
+            "violations": violations,
+            "rule_applied": rule,
+            "tool_count": len([tr for tr in tool_results if hasattr(tr, 'tool_name')])
+        }
 
 
 class VisualRegressionChecker:
-    """Compare screenshots against baselines for visual regression detection."""
+    """Compare screenshots against baselines for visual regression detection.
+
+    Delegates SSIM computation to Rust sunday-harness when available.
+    """
 
     def __init__(self, baseline_dir: Optional[str] = None):
         self.baseline_dir = baseline_dir or os.path.join(
@@ -88,9 +391,23 @@ class VisualRegressionChecker:
             "harness-stress-test", "baselines"
         )
         os.makedirs(self.baseline_dir, exist_ok=True)
+        # Rust-backed checker (faster, no GIL contention)
+        if _RUST_HARNESS_AVAILABLE:
+            output_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+                "harness-stress-test", "screenshots"
+            )
+            self._rust = sunday_rust.VisualRegressionChecker(self.baseline_dir, output_dir)
+        else:
+            self._rust = None
 
     def _compute_ssim(self, img1_path: str, img2_path: str) -> float:
         """Compute SSIM between two images. Falls back to pixel diff if PIL unavailable."""
+        if self._rust:
+            try:
+                return self._rust.compute_ssim(img1_path, img2_path)
+            except Exception as e:
+                logger.warning("Rust SSIM failed (%s), falling back to Python", e)
         try:
             from PIL import Image
             import numpy as np
@@ -141,6 +458,19 @@ class VisualRegressionChecker:
 
     def compare(self, screenshot_path: str, baseline_name: str, threshold: float = 0.95) -> Dict[str, Any]:
         """Compare a screenshot against its baseline. Returns comparison metrics."""
+        if self._rust:
+            try:
+                ssim, regression = self._rust.compare_against_baseline(baseline_name, screenshot_path)
+                return {
+                    "has_baseline": True,
+                    "ssim": ssim,
+                    "regression": regression,
+                    "threshold": threshold,
+                    "baseline_path": os.path.join(self.baseline_dir, f"{baseline_name}.png")
+                }
+            except Exception as e:
+                logger.warning("Rust visual compare failed (%s), falling back to Python", e)
+
         baseline_path = os.path.join(self.baseline_dir, f"{baseline_name}.png")
 
         if not os.path.exists(baseline_path):
@@ -165,16 +495,44 @@ class VisualRegressionChecker:
 
     def update_baseline(self, screenshot_path: str, baseline_name: str):
         """Update the baseline for a given test."""
+        if self._rust:
+            try:
+                self._rust.update_baseline(baseline_name, screenshot_path)
+                return
+            except Exception as e:
+                logger.warning("Rust baseline update failed (%s), falling back to Python", e)
         baseline_path = os.path.join(self.baseline_dir, f"{baseline_name}.png")
         import shutil
         shutil.copy2(screenshot_path, baseline_path)
 
 
 class AssertionEngine:
-    """Engine for evaluating structured assertions against test results."""
+    """Engine for evaluating structured assertions against test results.
+
+    Delegates to Rust sunday-harness when available for performance.
+    """
+
+    def __init__(self):
+        self._rust = sunday_rust.SkillHarness(sunday_rust.HarnessConfig()) if _RUST_HARNESS_AVAILABLE else None
 
     def evaluate(self, result: TestResult, assertions: List[Assertion]) -> List[AssertionResult]:
         """Evaluate all assertions against a test result."""
+        if self._rust:
+            rust_assertions = []
+            for a in assertions:
+                ra = a.to_rust()
+                if ra is not None:
+                    rust_assertions.append(ra)
+            if rust_assertions:
+                try:
+                    rust_results = self._rust.evaluate_assertions(rust_assertions, result.output, result.latency)
+                    return [
+                        AssertionResult.from_rust(rr, assertion)
+                        for rr, assertion in zip(rust_results, assertions)
+                    ]
+                except Exception as e:
+                    logger.warning("Rust assertion evaluation failed (%s), falling back to Python", e)
+        # Pure-Python fallback
         results = []
         for assertion in assertions:
             try:
@@ -305,13 +663,22 @@ class AssertionEngine:
 
 
 class PerformanceTracker:
-    """Track and compare performance metrics over time."""
+    """Track and compare performance metrics over time.
+
+    Delegates to Rust sunday-harness for persistent EMA baselines.
+    """
 
     def __init__(self, baseline_path: Optional[str] = None):
         self.baseline_path = baseline_path or os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
             "harness-stress-test", "performance_baseline.json"
         )
+        # Rust-backed tracker (SQLite/JSON persistence, no GIL)
+        if _RUST_HARNESS_AVAILABLE:
+            self._rust = sunday_rust.PerformanceTracker(self.baseline_path)
+        else:
+            self._rust = None
+        # Pure-Python fallback state
         self.baselines: Dict[str, Dict[str, float]] = self._load_baselines()
 
     def _load_baselines(self) -> Dict[str, Dict[str, float]]:
@@ -329,10 +696,27 @@ class PerformanceTracker:
             json.dump(self.baselines, f, indent=2)
 
     def get_baseline(self, tool_id: str) -> Optional[Dict[str, float]]:
+        if self._rust:
+            p50 = self._rust.get_baseline_latency_p50(tool_id)
+            if p50 is not None:
+                return {"latency_p50": p50}
         return self.baselines.get(tool_id)
 
     def check_regression(self, tool_id: str, latency: float, threshold_ratio: float = 1.5) -> Dict[str, Any]:
         """Check if current latency regresses beyond threshold."""
+        if self._rust:
+            try:
+                regressed, baseline_p50, ratio = self._rust.check_regression(tool_id, latency)
+                return {
+                    "has_baseline": baseline_p50 is not None,
+                    "regression": regressed,
+                    "ratio": ratio,
+                    "threshold": threshold_ratio,
+                    "baseline_latency": baseline_p50,
+                }
+            except Exception as e:
+                logger.warning("Rust perf check failed (%s), falling back to Python", e)
+
         baseline = self.baselines.get(tool_id)
         if not baseline:
             # First measurement: set baseline
@@ -367,6 +751,11 @@ class PerformanceTracker:
 
     def update_baseline(self, tool_id: str, latency: float):
         """Force update baseline for a tool."""
+        if self._rust:
+            try:
+                self._rust.update_baseline(tool_id, latency)
+            except Exception as e:
+                logger.warning("Rust baseline update failed (%s), falling back to Python", e)
         self.baselines[tool_id] = {
             "latency_p50": latency,
             "latency_p95": latency,
@@ -397,6 +786,12 @@ class SkillHarness:
         self._assertion_engine = AssertionEngine()
         self._visual_checker = VisualRegressionChecker(self.config.visual_baseline_path)
         self._perf_tracker = PerformanceTracker(self.config.latency_baseline_path)
+        # Instruction compliance checker for verifying correct tool usage
+        if self.config.instruction_compliance:
+            self._compliance_checker = InstructionComplianceChecker()
+            print(f"[✅ HARNESS] Instruction compliance checking enabled")
+        else:
+            self._compliance_checker = None
         # Ensure harness mode is set for SSRF bypass
         os.environ.setdefault("SUNDAY_HARNESS_MODE", "1")
 
@@ -410,12 +805,19 @@ class SkillHarness:
 
             cfg = load_config()
             # 🎯 FORCE local engine for harness — skip slow cloud discovery
+            # Override config to prevent cloud fallback
+            cfg.intelligence.provider = "local"
+            cfg.engine.default = "llamacpp"
             engine_tuple = get_engine(cfg, engine_key="llamacpp")
             if not engine_tuple:
-                # Fallback: try any healthy engine
-                engine_tuple = get_engine(cfg)
+                # Fallback: try any healthy LOCAL engine only
+                from sunday.engine._discovery import discover_engines
+                engines = discover_engines(cfg)
+                local_engines = [(k, v) for k, v in engines if k in ("llamacpp", "ollama", "mlx", "lmstudio")]
+                if local_engines:
+                    engine_tuple = local_engines[0]
             if not engine_tuple:
-                raise RuntimeError("No healthy inference engine found for the harness.")
+                raise RuntimeError("No healthy LOCAL inference engine found for the harness. Please ensure llama-server is running on :8081 or set SUNDAY_ENGINE=llamacpp")
 
             engine_name, engine_instance = engine_tuple
             # 🧠 HARD OPTIMIZATION: Manually load ONLY essential tools to ensure a tiny prompt
@@ -439,9 +841,14 @@ class SkillHarness:
                 SystemHealthTool()
             ]
 
+            # 🎯 FORCE harness to use local model only — never cloud
+            import os
+            os.environ["SUNDAY_ENGINE"] = "llamacpp"
+            os.environ["SUNDAY_HARNESS_MODE"] = "1"
+            
             self._orchestrator = OrchestratorAgent(
                 engine=engine_instance,
-                model=cfg.intelligence.default_model,
+                model=cfg.intelligence.fallback_model or cfg.intelligence.default_model,
                 mode="function_calling",
                 tools=tools,
                 parallel_tools=False,  # 🚶‍♂️ Sequential execution for better observability
@@ -450,6 +857,8 @@ class SkillHarness:
                 visual_audit=self.config.visual_audit,
             )
             self._orchestrator.verbose = True
+            # Override the provider to prevent hybrid routing to cloud
+            self._orchestrator._config.intelligence.provider = "local"
         return self._orchestrator
 
     def run_test(self, tool_id: str, prompt: str,
@@ -506,6 +915,23 @@ class SkillHarness:
                 perf_check = self._perf_tracker.check_regression(tool_id, latency)
                 if perf_check.get("regression"):
                     print(f"      [⚠️ PERFORMANCE] Latency regression detected: {perf_check['ratio']:.2f}x baseline")
+
+                # Check instruction compliance
+                if self._compliance_checker:
+                    compliance = self._compliance_checker.evaluate(
+                        prompt=prompt,
+                        tool_results=result.tool_results,
+                        output=result.content or "",
+                        latency=latency
+                    )
+                    if not compliance["compliant"]:
+                        print(f"      [❌ COMPLIANCE] Intent: {compliance['intent_detected']}")
+                        for v in compliance["violations"]:
+                            print(f"         - {v['type']}: {v['message']}")
+                        test_result.success = False
+                        test_result.error = f"Instruction compliance failed: {[v['message'] for v in compliance['violations']]})"
+                    else:
+                        print(f"      [✅ COMPLIANCE] Intent: {compliance['intent_detected']} - OK")
 
                 last_result = test_result
 
@@ -634,8 +1060,13 @@ class SkillHarness:
         from sunday.tools.browser import _session
         _session.close()
 
+        # Extract URL from mission if present, otherwise use base_url
+        import re
+        url_match = re.search(r'https?://[^\s\)]+', prompt)
+        target_url = url_match.group(0) if url_match else base_url
+        
         agent_task = (
-            f"COMMAND: Navigate to {base_url} using browser_navigate. "
+            f"COMMAND: Navigate to {target_url} using browser_navigate. "
             f"Then call browser_extract with extract_type='text' to read the page. "
             f"Based on what you see, state whether the mission is PASS or FAIL.\n"
             f"MISSION: {prompt}\n"

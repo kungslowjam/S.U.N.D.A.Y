@@ -106,3 +106,19 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+      - name: Build release binaries
+        run: |
+          cargo build --release -p sunday-server
+          cargo build --release -p sunday-cli
+          cargo build --release -p sunday-discord
+
+      - name: Upload Rust binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-binaries-${{ runner.os }}
+          path: |
+            rust/target/release/sunday-server
+            rust/target/release/sunday-cli
+            rust/target/release/sunday-discord
+          if-no-files-found: error

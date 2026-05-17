@@ -113,6 +113,40 @@ impl PyFileWriteTool {
     }
 }
 
+#[pyclass(name = "ListDirectoryTool")]
+pub struct PyListDirectoryTool;
+
+#[pymethods]
+impl PyListDirectoryTool {
+    #[new]
+    fn new() -> Self {
+        Self
+    }
+
+    #[pyo3(signature = (path=".", recursive=false, pattern="", max_depth=3, show_hidden=false))]
+    fn execute(
+        &self,
+        path: &str,
+        recursive: bool,
+        pattern: &str,
+        max_depth: usize,
+        show_hidden: bool,
+    ) -> PyResult<String> {
+        let tool = sunday_tools::builtin::directory_tools::ListDirectoryTool;
+        let params = serde_json::json!({
+            "path": path,
+            "recursive": recursive,
+            "pattern": pattern,
+            "max_depth": max_depth,
+            "show_hidden": show_hidden,
+        });
+        let result = tool
+            .execute(&params)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(result.content)
+    }
+}
+
 #[pyclass(name = "ShellExecTool")]
 pub struct PyShellExecTool;
 
@@ -147,12 +181,20 @@ impl PyHttpRequestTool {
         Self
     }
 
-    #[pyo3(signature = (url, method="GET", body=None))]
-    fn execute(&self, url: &str, method: &str, body: Option<&str>) -> PyResult<String> {
+    #[pyo3(signature = (url, method="GET", body=None, headers_json=None))]
+    fn execute(&self, url: &str, method: &str, body: Option<&str>, headers_json: Option<&str>) -> PyResult<String> {
         let tool = sunday_tools::builtin::http_tools::HttpRequestTool;
         let mut params = serde_json::json!({"url": url, "method": method});
         if let Some(body) = body {
             params["body"] = serde_json::Value::String(body.to_string());
+        }
+        if let Some(headers) = headers_json {
+            if !headers.is_empty() {
+                match serde_json::from_str::<serde_json::Value>(headers) {
+                    Ok(h) => { params["headers"] = h; }
+                    Err(e) => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Invalid headers JSON: {}", e))),
+                }
+            }
         }
         let result = tool
             .execute(&params)
@@ -308,13 +350,11 @@ impl PyNativeBrowser {
     fn click(&self, selector: String, headless: bool) -> PyResult<String> {
         let inner = self.inner.clone();
         crate::RUNTIME.block_on(async move {
-            let page = inner.ensure_page(headless).await
+            let _ = inner.ensure_page(headless).await
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-            page.find_element(&selector).await
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?
-                .click().await
+            inner.human_click(&selector).await
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-            Ok("Click successful".to_string())
+            Ok("Human click successful".to_string())
         })
     }
 
@@ -322,13 +362,11 @@ impl PyNativeBrowser {
     fn fill(&self, selector: String, text: String, headless: bool) -> PyResult<String> {
         let inner = self.inner.clone();
         crate::RUNTIME.block_on(async move {
-            let page = inner.ensure_page(headless).await
+            let _ = inner.ensure_page(headless).await
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-            page.find_element(&selector).await
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?
-                .type_str(text).await
+            inner.human_type(&selector, &text).await
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
-            Ok("Typing successful".to_string())
+            Ok("Human typing successful".to_string())
         })
     }
 
@@ -413,6 +451,111 @@ impl PyNativeBrowser {
     }
 }
 
+#[pyclass(name = "ApplyPatchTool")]
+pub struct PyApplyPatchTool;
+
+#[pymethods]
+impl PyApplyPatchTool {
+    #[new]
+    fn new() -> Self {
+        Self
+    }
+
+    #[pyo3(signature = (patch, path=None, backup=true))]
+    fn execute(&self, patch: &str, path: Option<&str>, backup: bool) -> PyResult<String> {
+        let tool = sunday_tools::builtin::apply_patch::ApplyPatchTool;
+        let mut params = serde_json::json!({"patch": patch, "backup": backup});
+        if let Some(p) = path {
+            params["path"] = serde_json::Value::String(p.to_string());
+        }
+        let result = tool
+            .execute(&params)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(result.content)
+    }
+}
+
+#[pyclass(name = "SemanticScholarSearchTool")]
+pub struct PySemanticScholarSearchTool;
+
+#[pymethods]
+impl PySemanticScholarSearchTool {
+    #[new]
+    fn new() -> Self {
+        Self
+    }
+
+    #[pyo3(signature = (query, limit=5, start_year=None, end_year=None))]
+    fn execute(&self, query: &str, limit: i64, start_year: Option<i64>, end_year: Option<i64>) -> PyResult<String> {
+        let tool = sunday_tools::builtin::academic_search::SemanticScholarSearchTool;
+        let mut params = serde_json::json!({"query": query, "limit": limit});
+        if let Some(sy) = start_year {
+            params["start_year"] = serde_json::Value::Number(sy.into());
+        }
+        if let Some(ey) = end_year {
+            params["end_year"] = serde_json::Value::Number(ey.into());
+        }
+        let result = tool
+            .execute(&params)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(result.content)
+    }
+}
+
+#[pyclass(name = "ArxivSearchTool")]
+pub struct PyArxivSearchTool;
+
+#[pymethods]
+impl PyArxivSearchTool {
+    #[new]
+    fn new() -> Self {
+        Self
+    }
+
+    #[pyo3(signature = (query, limit=5, start_year=None, end_year=None))]
+    fn execute(&self, query: &str, limit: i64, start_year: Option<i64>, end_year: Option<i64>) -> PyResult<String> {
+        let tool = sunday_tools::builtin::academic_search::ArxivSearchTool;
+        let mut params = serde_json::json!({"query": query, "limit": limit});
+        if let Some(sy) = start_year {
+            params["start_year"] = serde_json::Value::Number(sy.into());
+        }
+        if let Some(ey) = end_year {
+            params["end_year"] = serde_json::Value::Number(ey.into());
+        }
+        let result = tool
+            .execute(&params)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(result.content)
+    }
+}
+
+#[pyclass(name = "OpenAlexSearchTool")]
+pub struct PyOpenAlexSearchTool;
+
+#[pymethods]
+impl PyOpenAlexSearchTool {
+    #[new]
+    fn new() -> Self {
+        Self
+    }
+
+    #[pyo3(signature = (query, limit=5, start_year=None, end_year=None))]
+    fn execute(&self, query: &str, limit: i64, start_year: Option<i64>, end_year: Option<i64>) -> PyResult<String> {
+        let tool = sunday_tools::builtin::academic_search::OpenAlexSearchTool;
+        let mut params = serde_json::json!({"query": query, "limit": limit});
+        if let Some(sy) = start_year {
+            params["start_year"] = serde_json::Value::Number(sy.into());
+        }
+        if let Some(ey) = end_year {
+            params["end_year"] = serde_json::Value::Number(ey.into());
+        }
+        let result = tool
+            .execute(&params)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(result.content)
+    }
+}
+
 #[pyclass(name = "NativeMiner")]
 pub struct PyNativeMiner {
     inner: sunday_mining::DOMMiner,
@@ -429,6 +572,6 @@ impl PyNativeMiner {
 
     fn mine_html(&self, html: &str) -> PyResult<String> {
         let nodes = self.inner.extract_tree(html);
-        Ok(self.inner.format_for_llm(&nodes))
+        Ok(self.inner.format_for_llm(&nodes, 0))
     }
 }

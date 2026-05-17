@@ -133,124 +133,42 @@ class NativeReActAgent(ToolUsingAgent):
     ) -> AgentResult:
         self._emit_turn_start(input)
 
-        # Build system prompt with rich tool descriptions
-        tool_desc = build_tool_descriptions(self._tools)
-        # Plan 2B I3: render optimized few-shot skill examples as a section
-        # before the tool descriptions. Empty string when not present.
-        if self._skill_few_shot_examples:
-            skill_examples_block = (
-                "## Skill Examples\n\n"
-                + "\n\n".join(self._skill_few_shot_examples)
-                + "\n\n"
-            )
-        else:
-            skill_examples_block = ""
-        # Respect $OPENSUNDAY_HOME override for the base template (M2+ work).
-        prompt_template = (
-            load_system_prompt_override("native_react") or REACT_SYSTEM_PROMPT
-        )
-        # External overrides may not include the {skill_examples} slot.
         try:
-            system_prompt = prompt_template.format(
-                tool_descriptions=tool_desc,
-                skill_examples=skill_examples_block,
+            from sunday._rust_bridge import get_rust_module
+            rust_mod = get_rust_module()
+            
+            # Since the rust NativeReActAgent uses its own system prompt and tools,
+            # we just instantiate and run it here.
+            # We map the engine key (e.g. 'ollama' or 'llama_cpp') based on the Python engine type.
+            engine_key = getattr(self._engine, "engine_id", "ollama")
+            
+            agent = rust_mod.NativeReActAgent(
+                engine_key=engine_key,
+                host="http://localhost:11434",
+                model=self._model,
+                max_turns=self._max_turns,
+                temperature=self._temperature,
             )
-        except KeyError:
-            system_prompt = prompt_template.format(tool_descriptions=tool_desc)
-            if skill_examples_block:
-                system_prompt = system_prompt + "\n\n" + skill_examples_block
-
-        messages = self._build_messages(input, context, system_prompt=system_prompt)
-
-        # Inject few-shot exemplars before the user input
-        for ex in load_few_shot_exemplars("native_react"):
-            if ex.get("input") and ex.get("output"):
-                messages.insert(-1, Message(role=Role.USER, content=ex["input"]))
-                messages.insert(-1, Message(role=Role.ASSISTANT, content=ex["output"]))
-
-        all_tool_results: list[ToolResult] = []
-        turns = 0
-        total_usage: dict[str, int] = {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        }
-
-        for _turn in range(self._max_turns):
-            turns += 1
-
-            if self._loop_guard:
-                messages = self._loop_guard.compress_context(messages)
-
-            result = self._generate(messages)
-            usage = result.get("usage", {})
-            for k in total_usage:
-                total_usage[k] += usage.get(k, 0)
-
-            content = result.get("content", "")
-            parsed = self._parse_response(content)
-
-            # Final answer?
-            if parsed["final_answer"]:
-                self._emit_turn_end(turns=turns)
-                msg_dicts = [_message_to_dict(m) for m in messages]
-                return AgentResult(
-                    content=parsed["final_answer"],
-                    tool_results=all_tool_results,
-                    turns=turns,
-                    metadata={**total_usage, "messages": msg_dicts},
-                )
-
-            # No action? Treat content as final answer
-            if not parsed["action"]:
-                self._emit_turn_end(turns=turns)
-                msg_dicts = [_message_to_dict(m) for m in messages]
-                return AgentResult(
-                    content=content,
-                    tool_results=all_tool_results,
-                    turns=turns,
-                    metadata={**total_usage, "messages": msg_dicts},
-                )
-
-            # Execute action
-            messages.append(Message(role=Role.ASSISTANT, content=content))
-
-            tool_call = ToolCall(
-                id=f"react_{turns}",
-                name=parsed["action"],
-                arguments=parsed["action_input"] or "{}",
+            
+            # Run the rust agent
+            result = agent.run(input)
+            
+            self._emit_turn_end(turns=result.turns)
+            return AgentResult(
+                content=result.content,
+                tool_results=[],  # Tool results are managed by Rust internally for now
+                turns=result.turns,
+                metadata={"rust_native": True},
             )
 
-            # Loop guard check before execution
-            if self._loop_guard:
-                verdict = self._loop_guard.check_call(
-                    tool_call.name,
-                    tool_call.arguments,
-                )
-                if verdict.blocked:
-                    tool_result = ToolResult(
-                        tool_name=tool_call.name,
-                        content=f"Loop guard: {verdict.reason}",
-                        success=False,
-                    )
-                    all_tool_results.append(tool_result)
-                    observation = f"Observation: {tool_result.content}"
-                    messages.append(Message(role=Role.USER, content=observation))
-                    continue
-
-            tool_result = self._executor.execute(tool_call)
-            all_tool_results.append(tool_result)
-
-            observation = f"Observation: {tool_result.content}"
-            messages.append(Message(role=Role.USER, content=observation))
-
-        # Max turns exceeded
-        msg_dicts = [_message_to_dict(m) for m in messages]
-        return self._max_turns_result(
-            all_tool_results,
-            turns,
-            metadata={**total_usage, "messages": msg_dicts},
-        )
-
+        except Exception as e:
+            # Fallback to a failure message if rust agent crashes or is not available
+            self._emit_turn_end(turns=1)
+            return AgentResult(
+                content=f"Error running native Rust ReAct agent: {e}",
+                tool_results=[],
+                turns=1,
+                metadata={"error": str(e)},
+            )
 
 __all__ = ["NativeReActAgent", "REACT_SYSTEM_PROMPT"]

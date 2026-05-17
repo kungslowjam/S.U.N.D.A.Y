@@ -325,3 +325,59 @@ class TestToolUsingAgent:
 
         assert result.success is True
         confirm.assert_called_once()
+
+
+
+class TestBuildMessagesProjectContext:
+    def test_agents_md_appended_to_system_prompt(self, tmp_path: Path, monkeypatch):
+        from sunday.core.config import JarvisConfig
+
+        cfg = JarvisConfig()
+        cfg.agent.default_system_prompt = "You are SUNDAY."
+        monkeypatch.setattr("sunday.agents._stubs.load_config", lambda: cfg)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "AGENTS.md").write_text("Always be concise.")
+
+        engine = MagicMock()
+        agent = _ConcreteAgent(engine, "m")
+        messages = agent._build_messages("hello")
+
+        assert messages[0].role == Role.SYSTEM
+        assert "You are SUNDAY." in messages[0].content
+        assert "Always be concise." in messages[0].content
+        assert "Project Instructions" in messages[0].content
+
+    def test_claude_md_appended_to_system_prompt(self, tmp_path: Path, monkeypatch):
+        from sunday.core.config import JarvisConfig
+
+        cfg = JarvisConfig()
+        cfg.agent.default_system_prompt = "You are SUNDAY."
+        monkeypatch.setattr("sunday.agents._stubs.load_config", lambda: cfg)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "CLAUDE.md").write_text("Use black formatter.")
+
+        engine = MagicMock()
+        agent = _ConcreteAgent(engine, "m")
+        messages = agent._build_messages("hello")
+
+        assert "Use black formatter." in messages[0].content
+        assert "Coding Conventions" in messages[0].content
+
+    def test_no_project_context_when_files_absent(self, monkeypatch):
+        from sunday.core.config import JarvisConfig
+        from sunday.core.project_context import ProjectContext
+
+        cfg = JarvisConfig()
+        cfg.agent.default_system_prompt = "You are SUNDAY."
+        monkeypatch.setattr("sunday.agents._stubs.load_config", lambda: cfg)
+        # Stub out project-context discovery entirely
+        monkeypatch.setattr(
+            "sunday.agents._stubs.get_project_context",
+            lambda **kwargs: ProjectContext(),
+        )
+
+        engine = MagicMock()
+        agent = _ConcreteAgent(engine, "m")
+        messages = agent._build_messages("hello")
+
+        assert messages[0].content == "You are SUNDAY."

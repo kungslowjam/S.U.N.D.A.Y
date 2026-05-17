@@ -16,6 +16,7 @@ pub mod reward;
 pub mod router_enum;
 pub mod sft_policy;
 pub mod skill_discovery;
+pub mod skill_evolution;
 pub mod trace_policy;
 pub mod training_data;
 pub mod traits;
@@ -35,6 +36,7 @@ pub use reward::{AdaptiveRewardWeights, MultiObjectiveReward, Normalizers, Rewar
 pub use router_enum::RouterPolicyEnum;
 pub use sft_policy::SFTRouterPolicy;
 pub use skill_discovery::{DiscoveredSkill, SkillDiscovery};
+pub use skill_evolution::{SkillEvolutionEngine, SkillPerformanceTracker, SkillStats, SkillIteration, IterationAction, EvolutionError};
 pub use trace_policy::{classify_query, TraceDrivenPolicy};
 pub use training_data::{AgentConfigPair, MinerTraceData, RoutingRecommendation, SFTPair, TrainingDataMiner};
 pub use traits::{LearningPolicy, RouterPolicy};

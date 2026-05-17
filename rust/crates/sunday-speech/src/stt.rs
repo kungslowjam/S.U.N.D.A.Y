@@ -1,7 +1,7 @@
 use candle_core::{Device, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::whisper::{self, model::Whisper};
-use crate::{TranscriptionResult, SpeechSegment};
+use crate::TranscriptionResult;
 use anyhow::Result;
 use std::path::Path;
 

@@ -6,6 +6,7 @@ pub mod monitor_operative;
 pub mod native_openhands;
 pub mod native_react;
 pub mod orchestrator;
+pub mod parsing;
 pub mod simple;
 pub mod traits;
 pub mod runtime;

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import html
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+LOGGER = logging.getLogger(__name__)
+
 from sunday.core.events import EventBus
+from sunday.core.project_context import ProjectContextLoader
 from sunday.skills.dependency import validate_dependencies
 from sunday.skills.executor import SkillExecutor, SkillResult
-from sunday.skills.loader import discover_skills
+from sunday.skills.loader import discover_skills, load_skill_markdown
 from sunday.skills.tool_adapter import SkillTool
 from sunday.skills.types import SkillManifest
 from sunday.tools._stubs import BaseTool, ToolExecutor
@@ -92,6 +96,33 @@ class SkillManager:
         # paths are provided, so callers can apply overlays to skills loaded
         # via other means.
         self._load_overlays()
+
+    def discover_project_skills(self, cwd: Optional[Path] = None) -> List[str]:
+        """Scan the current project tree for SKILL.md files and register them.
+
+        Uses :class:`ProjectContextLoader` to find the project root and
+        discover ``SKILL.md`` files up to a shallow depth.  Returns the list
+        of skill names that were registered.
+        """
+        loader = ProjectContextLoader(cwd=cwd, scan_skills=True)
+        ctx = loader.load()
+        registered: List[str] = []
+
+        for skill_path in ctx.skill_paths:
+            try:
+                manifest = load_skill_markdown(skill_path)
+            except Exception as exc:
+                LOGGER.warning("Failed to load project skill %s: %s", skill_path, exc)
+                continue
+
+            if manifest.name not in self._skills:
+                self._skills[manifest.name] = manifest
+                registered.append(manifest.name)
+
+        if registered:
+            LOGGER.info("Registered %d project skill(s): %s", len(registered), registered)
+
+        return registered
 
     def _load_overlays(self) -> None:
         """Apply optimization overlays to discovered skills.
@@ -425,6 +456,8 @@ class SkillManager:
         self,
         name: str,
         context: Optional[Dict[str, Any]] = None,
+        *,
+        trace_id: Optional[str] = None,
     ) -> SkillResult:
         """Resolve and execute a skill by name.
 
@@ -434,18 +467,24 @@ class SkillManager:
             Skill name to execute.
         context:
             Initial context dict passed to the executor.
+        trace_id:
+            Optional trace identifier forwarded to the skill-evolution engine.
 
         Returns
         -------
         SkillResult
         """
+        import uuid
+
         manifest = self.resolve(name)
         executor = SkillExecutor(
             self._tool_executor or _NullToolExecutor(),
             bus=self._bus,
         )
         executor.set_skill_resolver(self._make_resolver())
-        return executor.run(manifest, initial_context=context)
+        return executor.run(
+            manifest, initial_context=context, trace_id=trace_id or str(uuid.uuid4())
+        )
 
     # ------------------------------------------------------------------
     # Configuration
@@ -454,6 +493,83 @@ class SkillManager:
     def set_tool_executor(self, tool_executor: ToolExecutor) -> None:
         """Attach a :class:`ToolExecutor` for running tool steps in skill pipelines."""
         self._tool_executor = tool_executor
+
+    # ------------------------------------------------------------------
+    # Skill evolution (Hermes-style closed loop)
+    # ------------------------------------------------------------------
+
+    def process_skills_batch(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Run the Rust skill-evolution engine over recent traces.
+
+        Discovers recurring tool patterns, writes new SKILL.md files to
+        ``~/.sunday/skills/discovered/``, and returns metadata for each
+        discovered or updated skill.
+
+        Parameters
+        ----------
+        limit:
+            Maximum number of new traces to process in this batch.
+
+        Returns
+        -------
+        list[dict]
+            Discovered skill records with ``name``, ``confidence``, etc.
+        """
+        import json as _json
+
+        from sunday._rust_bridge import get_skill_evolution_engine
+
+        engine = get_skill_evolution_engine()
+        if engine is None:
+            LOGGER.warning("SkillEvolutionEngine not available in Rust backend")
+            return []
+        try:
+            raw = engine.process_batch(limit)
+            skills = _json.loads(raw)
+            LOGGER.info(
+                "Skill evolution batch complete: %d skill(s) discovered/updated",
+                len(skills),
+            )
+            return skills if isinstance(skills, list) else []
+        except Exception as exc:
+            LOGGER.warning("Skill evolution batch failed: %s", exc)
+            return []
+
+    def iterate_skills(self) -> List[Dict[str, Any]]:
+        """Re-evaluate existing discovered skills and upgrade their confidence.
+
+        Returns a list of ``{"name": str, "confidence": float}`` dicts.
+        """
+        import json as _json
+
+        from sunday._rust_bridge import get_skill_evolution_engine
+
+        engine = get_skill_evolution_engine()
+        if engine is None:
+            LOGGER.warning("SkillEvolutionEngine not available in Rust backend")
+            return []
+        try:
+            raw = engine.iterate_skills()
+            result = _json.loads(raw)
+            return result if isinstance(result, list) else []
+        except Exception as exc:
+            LOGGER.warning("Skill iteration failed: %s", exc)
+            return []
+
+    def get_skill_stats(self, name: str) -> Dict[str, Any]:
+        """Return performance stats for a skill from the evolution engine."""
+        import json as _json
+
+        from sunday._rust_bridge import get_skill_evolution_engine
+
+        engine = get_skill_evolution_engine()
+        if engine is None:
+            return {}
+        try:
+            raw = engine.get_skill_stats(name)
+            return _json.loads(raw)
+        except Exception:
+            return {}
 
     # ------------------------------------------------------------------
     # Lifecycle

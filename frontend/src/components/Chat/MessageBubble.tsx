@@ -5,16 +5,51 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
-import { Copy, Check, Volume2 } from 'lucide-react';
+import { Copy, Check, Volume2, Brain, ChevronDown, ChevronUp } from 'lucide-react';
 import { AudioPlayer } from './AudioPlayer';
 import { ToolCallCard } from './ToolCallCard';
 import { XRayFooter } from './XRayFooter';
 import type { ChatMessage } from '../../types';
 
-function stripThinkTags(text: string): string {
-  let cleaned = text.replace(/ thinking[\s\S]*?<\/think>\s*/gi, '');
-  cleaned = cleaned.replace(/^[\s\S]*?<\/think>\s*/i, '');
-  return cleaned.trim();
+interface ParsedContent {
+  thinking: string;
+  isThinkingActive: boolean;
+  content: string;
+}
+
+function parseContent(text: string): ParsedContent {
+  if (!text) return { thinking: '', isThinkingActive: false, content: '' };
+
+  const thinkStart = text.indexOf('<think>');
+  const thinkEnd = text.indexOf('</think>');
+
+  if (thinkStart !== -1) {
+    if (thinkEnd !== -1) {
+      // Thinking completed
+      const thinking = text.slice(thinkStart + 7, thinkEnd).trim();
+      const content = text.slice(thinkEnd + 8).trim();
+      return { thinking, isThinkingActive: false, content };
+    } else {
+      // Currently thinking (generating)
+      const thinking = text.slice(thinkStart + 7).trim();
+      return { thinking, isThinkingActive: true, content: '' };
+    }
+  }
+
+  // Legacy fallback for "thinking" without tags (sometimes returned by older models)
+  const legacyThinkStart = text.toLowerCase().indexOf('thinking\n');
+  if (legacyThinkStart !== -1) {
+    const nextText = text.slice(legacyThinkStart + 9);
+    // Find double newline or end of thinking
+    const legacyThinkEnd = nextText.indexOf('\n\n');
+    if (legacyThinkEnd !== -1) {
+      const thinking = nextText.slice(0, legacyThinkEnd).trim();
+      const content = nextText.slice(legacyThinkEnd + 2).trim();
+      return { thinking, isThinkingActive: false, content };
+    }
+  }
+
+  return { thinking: '', isThinkingActive: false, content: text };
 }
 
 interface Props {
@@ -157,11 +192,50 @@ export function MessageBubble({ message }: Props) {
     );
   }
 
-  const cleanContent = useMemo(() => stripThinkTags(message.content), [message.content]);
+  const [thinkingExpanded, setThinkingExpanded] = useState(false);
+
+  const { thinking, isThinkingActive, content: cleanContent } = useMemo(
+    () => parseContent(message.content),
+    [message.content]
+  );
+
+  const isThinkingExpanded = thinkingExpanded || isThinkingActive;
 
   return (
     <div className="group mb-6">
       <div className="flex-1 min-w-0">
+        {/* Thinking Block */}
+        {(thinking || isThinkingActive) && (
+          <div className="mb-3 rounded-xl border border-violet-500/10 bg-violet-950/10 backdrop-blur-sm overflow-hidden transition-all duration-300">
+            <button
+              onClick={() => setThinkingExpanded(!thinkingExpanded)}
+              className="flex items-center justify-between w-full px-3 py-1.5 text-left text-[11px] font-medium text-violet-300 hover:text-violet-100 transition-all select-none cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5">
+                <Brain 
+                  size={12} 
+                  className={`text-violet-400 ${isThinkingActive ? 'animate-pulse' : ''}`} 
+                />
+                <span>
+                  {isThinkingActive ? 'Thinking...' : 'Thought Process (Click to expand)'}
+                </span>
+              </div>
+              <div className="text-violet-400">
+                {isThinkingExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
+              </div>
+            </button>
+            
+            {isThinkingExpanded && (
+              <div className="px-3 pb-2.5 pt-1 border-t border-violet-500/5 text-[11.5px] leading-relaxed text-slate-400 font-sans italic whitespace-pre-wrap select-text">
+                {thinking}
+                {isThinkingActive && (
+                  <span className="inline-block w-1.5 h-3 ml-1 bg-violet-400 animate-pulse align-middle" />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {message.toolCalls && message.toolCalls.length > 0 && (
           <div className="mb-4 flex flex-col gap-2">
             {message.toolCalls.map((tc) => (

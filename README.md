@@ -1,66 +1,81 @@
-# 🌌 S.U.N.D.A.Y (v2.0 Native Edition)
+# 🌌 S.U.N.D.A.Y (v3.0 Super Agent Edition)
+
+<p align="center">
+  <img src="assets/sunday_mascot.png" width="300" alt="SUNDAY AI Mascot">
+</p>
 
 ### **Self-improving Unified Network for Desktop Automation & Yardsticking**
 
-SUNDAY is a next-generation, autonomous agent runtime that has evolved from a Python-based prototype into a **High-Performance Rust-Native Engine**. Built for extreme speed, local privacy, and self-evolution, SUNDAY v2.0 leverages Rust to eliminate traditional AI bottlenecks.
+**SUNDAY** is a state-of-the-art, high-performance autonomous agent runtime. It is a **Rust-Native Powerhouse** designed for extreme speed, local privacy, and deep desktop operating systems integration. SUNDAY doesn't just chat; it **operates** your desktop, browser, and office suite with human-like reasoning, multi-turn tool calling, and machine-like precision.
 
 ---
 
-## 🏗️ New Architecture: Rust-Native Core
+## ⚡ Core Philosophy: "Performance as a Feature"
+Traditional AI agents are slowed down by high-latency APIs, heavy Python overhead, and brittle browser tools. SUNDAY breaks these barriers:
+- **Rust-Native Core:** Core logic, DOM mining, and local inference bridges are built from the ground up in **Rust**.
+- **Super-Agent Toolset:** Integrates the capability of elite runtimes like **Manus, Claude Code, Codex, and OpenWork**.
+- **Stealth Networking:** Injected realistic browser identities to bypass Cloudflare/API rate limits effortlessly.
+- **Local-First with Zero-Copy:** Optimizations for GGUF (Llama.cpp) and Ollama using shared memory (SHM).
 
-SUNDAY now utilizes a **Hybrid Multi-Engine** architecture where performance-critical components are implemented in Native Rust, while maintaining Python's flexibility for high-level UI and rapid prototyping.
+---
+
+## 🚀 Key Features & Agent Suites
+
+### 🌐 **OpenWork & Antigravity Browser Engine**
+Goes beyond simple browser scraping. SUNDAY maps and acts on the web visually and semantically:
+- **AX-Tree Tracking (`browser_view_tree`):** Extracts simplified accessibility node trees from active web pages, mapping elements to unique index IDs (e.g. `[1] button: "Login"`).
+- **Stealth Element ID Resolution:** Agent can click or type into elements simply using numbers (e.g. `browser_click("12")`), which automatically maps under the hood to native element attributes.
+- **Human-like Interactions:** Smooth mouse movements, randomized keystroke delays, and automatic realistic Chrome/Windows User-Agent headers to stay undetected.
+- **Fast Mining:** Native Rust-based DOM extraction (`sunday-mining`) performing 10-100x faster than Playwright/Puppeteer wrappers.
+
+### 🧠 **Manus-Style Planning & Memory Persistence**
+- **Roadmap Management (`task_planner`):** Enables the agent to autonomously structure long-horizon goals, map execution roadmaps, and maintain an active task board.
+- **SQLite Memory Search (`memory_store` / `memory_search`):** Permanent context memory using case-insensitive FTS5 full-text indexing, allowing the agent to remember facts across different turns and sessions.
+
+### 📂 **Claude Code & Codex Workspace Tools**
+- **Symbol Analysis (`code_analyzer`):** High-speed static extraction of symbols (functions, classes, structs, types) from directories.
+- **Project Structure (`repo_map`):** Generates zero-dependency directory tree representations instantly.
+- **Batch Processing (`read_multiple_files`):** Allows high-throughput multiple-file context access at once.
+
+### 📁 **Native Office Automation**
+- **Word & Excel Bridge:** Native COM interface automation allows compiling reports, running calculations, and formatting documents on the fly without intermediate files.
+
+---
+
+## 🏗️ Technical Architecture
 
 ```mermaid
 graph TD
-    User((👤 User)) -->|Goal| CLI[🚀 Rust CLI]
-    CLI -->|Orchestrate| Runtime[⚙️ Agent Runtime - Rust]
+    User((👤 User)) -->|Goal| Dashboard[🎨 CommandCenter - React / Tauri]
+    Dashboard -->|Invoke| Core[🦀 Rust Core Server / sunday-server]
     
-    subgraph "Rust Native Engine"
-        Runtime -->|Execute| Orch[🧠 Orchestrator - Rust]
-        Orch -->|Safe Run| Sandbox[🛡️ Wasm Sandbox]
-        Orch -->|Fast Read| Miner[🌐 DOM Miner]
-        Orch -->|Direct Audio| Speech[🎙️ Streaming Speech]
+    subgraph "Native Performance Layer (Rust)"
+        Core -->|Reason| Engine[🧠 Inference Engine - GGUF/SHM]
+        Core -->|Action| Tools[🛠️ sunday-tools]
+        Tools -->|COM| Office[📁 Word/Excel Automation]
+        Tools -->|Stealth/AX-Tree| Browser[🌐 Native Browser Engine]
+        Tools -->|FTS5 SQLite| Memory[💾 Persistent memory]
     end
 
-    subgraph "Capabilities"
-        Speech -->|STT| Whisper[👂 Whisper.cpp]
-        Speech -->|TTS| Kokoro[🗣️ Kokoro ONNX]
-        Miner -->|Extraction| Scraper[🏗️ Scraper/Ego-tree]
-        Sandbox -->|WASI| Wasmtime[📦 Wasmtime]
+    subgraph "Workspace Isolation"
+        Core -->|Isolate| WS[📂 Project Workspaces]
     end
 
-    Orch -->|Tool Call| PyTools[🐍 Python Tools]
+    subgraph "Intelligence Routing"
+        Engine -->|Local| Llama[🦙 Llama.cpp / Ollama]
+        Engine -->|Cloud| GPT[☁️ High-Reasoning API]
+    end
 ```
-
----
-
-## 🚀 Performance & Security Revolution
-
-### 🏎️ **Native Orchestration & Parsing**
-The core **Thought-Tool-Observation** loop is now implemented in Rust. Using compiled regexes and zero-copy message handling, SUNDAY handles complex reasoning and tool-routing in sub-millisecond time, bypassing the Python GIL.
-
-### 🎙️ **Zero-Latency Streaming Speech**
-Moved from file-based STT/TTS to **In-Memory Streaming**:
-- **STT:** Whisper transcription via `candle` (Pure Rust) processing audio directly in RAM.
-- **TTS:** High-quality synthesis via `Kokoro-ONNX` (ORT), eliminating the need for heavy Python dependencies like `numpy` or temporary `.wav` files.
-
-### 🛡️ **Wasm Security Sandbox**
-AI-generated code now runs in a dedicated **WebAssembly (Wasmtime)** sandbox.
-- **Isolation:** 100% isolation from the host system.
-- **Resource Control:** Strict fuel limiting to prevent infinite loops or memory exhaustion.
-
-### 🌐 **High-Speed DOM Mining**
-Browser data extraction is powered by `sunday-mining` (Rust). It parses massive HTML trees 10-100x faster than traditional Python libraries, allowing agents to "see" and "interact" with complex web pages instantly.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Core Runtime:** Rust (Tokio, Rig-core, OnceCell)
-- **ML Inference:** Candle (STT), ONNX Runtime (TTS/Vision), Llama.cpp (LLM)
-- **Security:** Wasmtime + WASI
-- **Browser:** Chromiumoxide (Rust) + Playwright (Python)
-- **Automation:** Python 3.12 (uv) for legacy tool support
+- **Backend:** Rust (Axum, Tokio, Rig-core, Windows-rs, Chromiumoxide)
+- **Frontend:** React, TypeScript, Tailwind CSS, Framer Motion, Lucide Icons
+- **Desktop Wrapper:** Tauri (Native Performance & Security)
+- **AI/ML:** Llama.cpp (GGUF), ONNX Runtime, Whisper (Streaming STT), Kokoro (TTS)
+- **Communication:** Bidirectional Discord gateways, Voice Live overlay, CLI, and Web.
 
 ---
 
@@ -68,38 +83,50 @@ Browser data extraction is powered by `sunday-mining` (Rust). It parses massive 
 
 ```bash
 SUNDAY/
-├── rust/crates/           # 🦀 Native Rust Core
-│   ├── sunday-agents/     # Orchestrator & Multi-turn logic
-│   ├── sunday-core/       # Shared types, EventBus, Telemetry
-│   ├── sunday-speech/     # Streaming STT (Whisper) & TTS (Kokoro)
+├── rust/crates/           # 🦀 High-Performance Native Core Workspace
+│   ├── sunday-core/       # Shared types, Event Bus & Loop Guards
+│   ├── sunday-tools/      # Native Tools (Office, Browser, Memory, Workspace)
+│   ├── sunday-engine/     # Inference management & GGUF Llama.cpp
+│   ├── sunday-sessions/   # Persistent session & history
 │   ├── sunday-mining/     # High-speed DOM parsing
-│   └── sunday-sandbox/    # Wasmtime code execution
-├── src/sunday/            # 🐍 Python Orchestration & UI
-│   ├── agents/            # Legacy Python agents
-│   └── tools/             # Auto-discovered capabilities
-├── frontend/              # 🎨 Web Dashboard (Next.js/Vite)
-└── configs/               # ⚙️ Model & Tool configurations
+│   └── sunday-server/     # High-performance Axum SSE server
+├── frontend/              # 🎨 CommandCenter UI (React/Vite/Tauri)
+├── desktop/               # 🖥️ Tauri Desktop Configuration
+└── workspaces/            # 📂 Isolated Task Environments
 ```
 
 ---
 
-## 🏁 Quick Start
+## 🏁 Getting Started
 
-Ensure you have `Rust` and `uv` installed.
+### Prerequisites
+- [Rust](https://rustup.rs/) (Stable)
+- Windows OS (with Microsoft Office installed for native COM features)
 
-1. **Build the Native Engine:**
+### Quick Start
+1. **Clone & Setup:**
    ```bash
-   cd rust
-   cargo build --release
+   git clone https://github.com/kungslowjam/S.U.N.D.A.Y.git
+   cd S.U.N.D.A.Y
    ```
 
-2. **Start the Integrated Runtime:**
+2. **Run All Services (Engine, Server, Frontend, Discord):**
    ```powershell
-   .\start_sunday_all.ps1
+   # Boot the entire super-agent stack with one click
+   .\rust\target\release\sunday-cli.exe start --all
+   ```
+
+3. **Or Compile from Source:**
+   ```bash
+   cd rust
+   cargo build --release -p sunday-server
    ```
 
 ---
 
-## 📜 License
-This project is a personal fork of the **OpenJarvis/SUNDAY** stack, maintaining the **Apache 2.0 License**.
-Developed with 💜 for high-performance autonomous agents.
+## 📜 License & Acknowledgments
+This project is an advanced fork of the **OpenJarvis/SUNDAY** stack, maintaining the **Apache 2.0 License**.
+Developed with 💜 for high-performance autonomous agents that actually get things done.
+
+---
+*“S.U.N.D.A.Y: Because the future isn't just about chatting with AI, it's about AI operating the future.”*

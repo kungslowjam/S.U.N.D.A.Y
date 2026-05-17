@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
+import re
+import html
 from typing import Any
 
 import httpx
@@ -15,6 +18,49 @@ from sunday.security.ssrf import check_ssrf
 from sunday.tools._stubs import BaseTool, ToolSpec
 
 logger = logging.getLogger(__name__)
+
+def clean_html_if_needed(text: str, content_type: str = "") -> str:
+    """Detect if the content is HTML, and if so, strip style/script/head tags,
+    decode HTML entities, and collapse white space to optimize token usage by 90%+."""
+    is_html = "text/html" in content_type.lower()
+    if not is_html:
+        # Check signature if content-type is missing or vague
+        truncated_prefix = text[:1000].lower()
+        is_html = "<html" in truncated_prefix or "<!doctype html" in truncated_prefix
+
+    if not is_html:
+        return text
+
+    logger.debug("HTML content detected. Filtering tags and metadata to optimize token usage...")
+    original_len = len(text)
+
+    # 1. Strip scripts, styles, and head tags (and their contents)
+    text = re.sub(r'(?is)<script\b[^>]*>.*?</script>', '', text)
+    text = re.sub(r'(?is)<style\b[^>]*>.*?</style>', '', text)
+    text = re.sub(r'(?is)<head\b[^>]*>.*?</head>', '', text)
+    text = re.sub(r'(?is)<!--.*?-->', '', text) # HTML comments
+
+    # 2. Strip all other tags, replacing them with a space to prevent word merging
+    text = re.sub(r'<[^>]+>', ' ', text)
+
+    # 3. Decode HTML entities
+    text = html.unescape(text)
+
+    # 4. Clean up whitespaces
+    lines = [line.strip() for line in text.splitlines()]
+    # Remove empty lines and collapse multiple spaces
+    cleaned_lines = []
+    for line in lines:
+        collapsed = re.sub(r'\s+', ' ', line).strip()
+        if collapsed:
+            cleaned_lines.append(collapsed)
+
+    cleaned_text = '\n'.join(cleaned_lines)
+    new_len = len(cleaned_text)
+    reduction = ((original_len - new_len) / original_len) * 100 if original_len > 0 else 0
+    
+    logger.info("HTML cleaned: %d -> %d chars (%.1f%% reduction)", original_len, new_len, reduction)
+    return cleaned_text + f"\n\n[💡 SUNDAY Token Optimization: HTML cleaned to raw text (Reduced by {reduction:.1f}%)]"
 
 # Maximum response body size: 1 MB
 _MAX_RESPONSE_BYTES = 1_048_576
@@ -105,35 +151,60 @@ class HttpRequestTool(BaseTool):
             k: os.path.expandvars(v) if isinstance(v, str) else v
             for k, v in (params.get("headers") or {}).items()
         }
+        
+        # Add default premium User-Agent to avoid generic crawler WAF blockages
+        if not any(k.lower() == "user-agent" for k in headers):
+            headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
         body = params.get("body")
         timeout = params.get("timeout", 30)
 
-        _rust = None
+        def add_scraper_tip_if_needed(text: str) -> str:
+            text_lower = text.lower()
+            if (
+                "cloudflare" in text_lower
+                or "403 forbidden" in text_lower
+                or "access denied" in text_lower
+                or "enable javascript" in text_lower
+                or "security check" in text_lower
+                or "block" in text_lower
+            ):
+                return text + (
+                    "\n\n[⚠️ SUNDAY Scraper Tip]: It appears this website is blocking direct HTTP scraping (e.g. Cloudflare, WAF, or 403 Forbidden) or requires JavaScript to load dynamically. "
+                    "Do NOT retry this HTTP request. Instead, please use 'web_search' to find the information, or use the browser automation tools "
+                    "(like 'browser_navigate' and 'browser_extract') which emulate a real user in a browser environment!"
+                )
+            return text
+
+        # Prefer Rust backend (now supports headers)
         try:
             from sunday._rust_bridge import get_rust_module
 
             _rust = get_rust_module()
+            headers_json = json.dumps(headers) if headers else None
+            content = _rust.HttpRequestTool().execute(url, method, body, headers_json)
+            content = clean_html_if_needed(content)
+            content = add_scraper_tip_if_needed(content)
+            
+            return ToolResult(
+                tool_name="http_request",
+                content=(
+                    content[:_MAX_RESPONSE_BYTES]
+                    if len(content) > _MAX_RESPONSE_BYTES
+                    else content
+                ),
+                success=True,
+                metadata={
+                    "status_code": 200,
+                    "truncated": len(content) > _MAX_RESPONSE_BYTES,
+                },
+            )
         except ImportError:
-            pass
-        if _rust is not None and not headers:
-            try:
-                content = _rust.HttpRequestTool().execute(url, method, body)
-                return ToolResult(
-                    tool_name="http_request",
-                    content=(
-                        content[:_MAX_RESPONSE_BYTES]
-                        if len(content) > _MAX_RESPONSE_BYTES
-                        else content
-                    ),
-                    success=True,
-                    metadata={
-                        "status_code": 200,
-                        "truncated": len(content) > _MAX_RESPONSE_BYTES,
-                    },
-                )
-            except Exception as exc:
-                logger.debug("Rust HTTP request fallback to httpx: %s", exc)
+            pass  # Fall through to httpx below
+        except Exception as exc:
+            logger.debug("Rust HTTP request failed, fallback to httpx: %s", exc)
 
+        # Python fallback
         try:
             t0 = time.time()
             response = httpx.request(
@@ -160,10 +231,13 @@ class HttpRequestTool(BaseTool):
             if truncated:
                 content += "\n\n[Response truncated at 1 MB]"
 
+            content = clean_html_if_needed(content, content_type)
+            content = add_scraper_tip_if_needed(content)
+
             return ToolResult(
                 tool_name="http_request",
                 content=content,
-                success=True,
+                success=response.status_code < 400,
                 metadata={
                     "status_code": response.status_code,
                     "headers": response_headers,

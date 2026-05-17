@@ -1,0 +1,82 @@
+# SUNDAY Code Review — AI-powered PR review using the SUNDAY agent runtime.
+#
+# This workflow demonstrates how to run SUNDAY as a GitHub Action for
+# automated pull-request analysis.  It loads AGENTS.md / CLAUDE.md from
+# the repository root so project-specific conventions are respected.
+#
+# Prerequisites
+# -------------
+# 1. Set ANTHROPIC_API_KEY (or OPENAI_API_KEY / OPENROUTER_API_KEY) in
+#    Repository Settings → Secrets and variables → Actions.
+# 2. Commit an AGENTS.md (and optionally CLAUDE.md) to your repo root.
+#
+# Usage
+# -----
+# The workflow runs automatically on every pull request.  SUNDAY will:
+# - Review changed files
+# - Check for security issues
+# - Verify coding conventions (from CLAUDE.md)
+# - Post a summary comment on the PR
+
+name: SUNDAY Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install SUNDAY
+        run: |
+          pip install -e .
+
+      - name: Run SUNDAY code review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          # Generate a diff of the PR
+          git diff origin/${{ github.base_ref }}...HEAD > pr_diff.patch
+
+          # Run the SUNDAY review agent
+          sunday ask \
+            --model "${{ vars.SUNDAY_REVIEW_MODEL || 'claude-sonnet-4-6' }}" \
+            "Review this PR diff for correctness, security, and style. \
+             Follow the conventions in AGENTS.md and CLAUDE.md if present. \
+             Output a concise summary with actionable suggestions." \
+            < pr_diff.patch \
+            > review_comment.md
+
+      - name: Post review comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('review_comment.md', 'utf8');
+            if (body.trim().length === 0) {
+              console.log('No review output generated; skipping comment.');
+              return;
+            }
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## 🤖 SUNDAY Code Review\n\n' + body
+            });

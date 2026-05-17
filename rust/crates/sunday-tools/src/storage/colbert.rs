@@ -8,12 +8,14 @@
 //! module provides the retrieval math and SQLite-backed persistence.
 
 use crate::storage::traits::MemoryBackend;
+use crate::storage::embeddings::Embedder;
 use sunday_core::{SUNDAYError, RetrievalResult};
 use parking_lot::Mutex;
 use rusqlite::Connection;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Default token embedding dimension for the dummy `embed_tokens()` stub.
@@ -24,10 +26,15 @@ pub struct ColBERTMemory {
     conn: Mutex<Connection>,
     _db_path: PathBuf,
     token_dim: usize,
+    embedder: Option<Arc<dyn Embedder>>,
 }
 
 impl ColBERTMemory {
     pub fn new(db_path: &Path, token_dim: usize) -> Result<Self, SUNDAYError> {
+        Self::with_embedder(db_path, token_dim, None)
+    }
+
+    pub fn with_embedder(db_path: &Path, token_dim: usize, embedder: Option<Arc<dyn Embedder>>) -> Result<Self, SUNDAYError> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
                 SUNDAYError::Io(std::io::Error::other(e))
@@ -61,6 +68,7 @@ impl ColBERTMemory {
             conn: Mutex::new(conn),
             _db_path: db_path.to_path_buf(),
             token_dim,
+            embedder,
         })
     }
 
@@ -72,25 +80,35 @@ impl ColBERTMemory {
         Self::new(Path::new(":memory:"), token_dim)
     }
 
-    /// Dummy token-level embedding stub.
+    /// Generate token-level embeddings for the given text.
     ///
-    /// Splits text on whitespace and produces one normalised vector per token by
-    /// hashing the token bytes.  Real token embeddings should be supplied externally.
+    /// If an embedder is configured, treats each token as a separate text
+    /// and embeds it; otherwise falls back to a hash stub.
     pub fn embed_tokens(&self, text: &str) -> Vec<Vec<f64>> {
-        text.split_whitespace()
-            .map(|token| {
-                let mut vec = vec![0.0f64; self.token_dim];
-                for (i, byte) in token.bytes().enumerate() {
-                    vec[i % self.token_dim] += byte as f64;
-                }
-                let norm = vec.iter().map(|x| x * x).sum::<f64>().sqrt();
-                if norm > 0.0 {
-                    for v in &mut vec {
-                        *v /= norm;
+        let tokens: Vec<&str> = text.split_whitespace().collect();
+        
+        if let Some(ref embedder) = self.embedder {
+            // Use the embedder for each token (word-level embeddings)
+            let mut result = Vec::new();
+            for token in &tokens {
+                match embedder.embed(token) {
+                    Ok(vec_f32) => {
+                        let vec_f64: Vec<f64> = vec_f32.into_iter().map(|f| f as f64).collect();
+                        result.push(vec_f64);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Embedder failed for token '{}': {}", token, e);
+                        // Fallback to hash stub for this token
+                        result.push(hash_token(token, self.token_dim));
                     }
                 }
-                vec
-            })
+            }
+            return result;
+        }
+
+        // Fallback hash stub
+        tokens.into_iter()
+            .map(|token| hash_token(token, self.token_dim))
             .collect()
     }
 
@@ -257,6 +275,24 @@ impl MemoryBackend for ColBERTMemory {
             })?;
         Ok(count as usize)
     }
+}
+
+// ---------------------------------------------------------------------------
+// Hash stub helper
+// ---------------------------------------------------------------------------
+
+fn hash_token(token: &str, dim: usize) -> Vec<f64> {
+    let mut vec = vec![0.0f64; dim];
+    for (i, byte) in token.bytes().enumerate() {
+        vec[i % dim] += byte as f64;
+    }
+    let norm = vec.iter().map(|x| x * x).sum::<f64>().sqrt();
+    if norm > 0.0 {
+        for v in &mut vec {
+            *v /= norm;
+        }
+    }
+    vec
 }
 
 // ---------------------------------------------------------------------------

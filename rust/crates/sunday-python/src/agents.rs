@@ -113,7 +113,9 @@ impl PyOrchestratorAgent {
         temperature: f64,
     ) -> PyResult<Self> {
         let adapter = make_adapter(engine_key, model)?;
-        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None, None));
+        let bus = sunday_core::events::GLOBAL_BUS.clone();
+        let guard = sunday_security::capabilities::PathGuard::new(Vec::<std::path::PathBuf>::new());
+        let executor = std::sync::Arc::new(sunday_tools::ToolExecutor::with_builtins(None, Some(guard), Some(bus.clone())));
         let agent = sunday_agents::OrchestratorAgent::new(
             adapter, system_prompt, executor, max_turns,
         );
@@ -156,7 +158,9 @@ impl PyNativeReActAgent {
         temperature: f64,
     ) -> PyResult<Self> {
         let adapter = make_adapter(engine_key, model)?;
-        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None, None));
+        let bus = sunday_core::events::GLOBAL_BUS.clone();
+        let guard = sunday_security::capabilities::PathGuard::new(Vec::<std::path::PathBuf>::new());
+        let executor = std::sync::Arc::new(sunday_tools::ToolExecutor::with_builtins(None, Some(guard), Some(bus.clone())));
         let agent = sunday_agents::NativeReActAgent::new(
             adapter, executor, max_turns, temperature,
         );
@@ -206,7 +210,9 @@ impl PyNativeOpenHandsAgent {
             Arc::new(engine),
             model.to_string(),
         );
-        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None, None));
+        let bus = sunday_core::events::GLOBAL_BUS.clone();
+        let guard = sunday_security::capabilities::PathGuard::new(Vec::<std::path::PathBuf>::new());
+        let executor = std::sync::Arc::new(sunday_tools::ToolExecutor::with_builtins(None, Some(guard), Some(bus.clone())));
         let agent = sunday_agents::NativeOpenHandsAgent::new(
             adapter,
             executor,
@@ -287,7 +293,9 @@ impl PyMonitorOperativeAgent {
             Arc::new(engine),
             model.to_string(),
         );
-        let executor = Arc::new(sunday_tools::ToolExecutor::new(None, None, None));
+        let bus = sunday_core::events::GLOBAL_BUS.clone();
+        let guard = sunday_security::capabilities::PathGuard::new(Vec::<std::path::PathBuf>::new());
+        let executor = std::sync::Arc::new(sunday_tools::ToolExecutor::with_builtins(None, Some(guard), Some(bus.clone())));
 
         let mem_ext = match memory_extraction {
             "scratchpad" => sunday_agents::MemoryExtraction::Scratchpad,
@@ -378,5 +386,181 @@ impl PyLoopGuard {
 
     fn reset(&mut self) {
         self.inner.reset()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Response parsing utilities (Rust-native, no GIL contention)
+// ---------------------------------------------------------------------------
+
+/// Parse structured response into dict.
+#[pyfunction]
+pub fn parse_structured_response(text: &str) -> PyResult<PyObject> {
+    let result = sunday_agents::parsing::parse_structured_response(text);
+    Python::with_gil(|py| {
+        let dict = pyo3::types::PyDict::new(py);
+        for (k, v) in result {
+            dict.set_item(k, v)?;
+        }
+        Ok(dict.into())
+    })
+}
+
+/// Extract tool call from text. Returns (tool_name, params_json) or None.
+#[pyfunction]
+pub fn extract_tool_call(text: &str) -> PyResult<Option<(String, String)>> {
+    Ok(sunday_agents::parsing::extract_tool_call(text))
+}
+
+/// Strip think tags and reasoning blocks from text.
+#[pyfunction]
+pub fn strip_think_tags(text: &str) -> String {
+    sunday_agents::parsing::strip_think_tags(text)
+}
+
+/// Convert markdown to Slack mrkdwn format.
+#[pyfunction]
+pub fn to_slack_fmt(text: &str) -> String {
+    sunday_agents::parsing::to_slack_fmt(text)
+}
+
+/// Clean browser-extracted text. Returns (cleaned_text, has_ratings, has_prices, has_listings).
+#[pyfunction]
+pub fn clean_browser_text(text: &str) -> PyResult<PyObject> {
+    let (content, has_ratings, has_prices, has_listings) = sunday_agents::parsing::clean_browser_text(text);
+    Python::with_gil(|py| {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("content", content)?;
+        dict.set_item("has_ratings", has_ratings)?;
+        dict.set_item("has_prices", has_prices)?;
+        dict.set_item("has_listings", has_listings)?;
+        Ok(dict.into())
+    })
+}
+
+/// Compress large tool outputs. Returns list of (role, content, was_truncated).
+#[pyfunction]
+pub fn compress_tool_outputs(
+    messages: Vec<(String, String, Option<String>)>,
+    threshold: usize,
+) -> PyResult<Vec<(String, String, bool)>> {
+    Ok(sunday_agents::parsing::compress_tool_outputs(&messages, threshold))
+}
+
+/// Apply message windowing. Returns list of indices to keep.
+#[pyfunction]
+pub fn apply_window(
+    roles: Vec<String>,
+    max_messages: usize,
+    preserve_system: bool,
+    preserve_initial_user: bool,
+) -> Vec<usize> {
+    sunday_agents::parsing::apply_window(&roles, max_messages, preserve_system, preserve_initial_user)
+}
+
+// ---------------------------------------------------------------------------
+// Skill auto-creation (Hermes-style closed learning loop)
+// ---------------------------------------------------------------------------
+
+/// Create a new SkillAutoCreator with given nudge interval.
+#[pyclass(name = "SkillAutoCreator")]
+pub struct PySkillAutoCreator {
+    inner: sunday_agents::parsing::SkillAutoCreator,
+}
+
+#[pymethods]
+impl PySkillAutoCreator {
+    #[new]
+    #[pyo3(signature = (nudge_interval=10))]
+    fn new(nudge_interval: usize) -> Self {
+        Self {
+            inner: sunday_agents::parsing::SkillAutoCreator::new(nudge_interval),
+        }
+    }
+
+    fn record_tool_call(&mut self) -> bool {
+        self.inner.record_tool_call()
+    }
+
+    fn reset(&mut self) {
+        self.inner.reset()
+    }
+
+    #[getter]
+    fn tool_call_count(&self) -> usize {
+        self.inner.tool_call_count()
+    }
+}
+
+/// Analyze conversation for skill candidate. Returns dict or None.
+#[pyfunction]
+pub fn analyze_conversation_for_skill(
+    conversation: &str,
+    tool_sequence: Vec<String>,
+) -> PyResult<Option<PyObject>> {
+    let candidate = sunday_agents::parsing::analyze_conversation_for_skill(conversation, &tool_sequence);
+    match candidate {
+        Some(c) => Python::with_gil(|py| {
+            let dict = pyo3::types::PyDict::new(py);
+            dict.set_item("name", c.name)?;
+            dict.set_item("description", c.description)?;
+            dict.set_item("tool_sequence", c.tool_sequence)?;
+            dict.set_item("confidence", c.confidence)?;
+            Ok(Some(dict.into()))
+        }),
+        None => Ok(None),
+    }
+}
+
+/// Generate SKILL.md manifest from candidate.
+#[pyfunction]
+pub fn generate_skill_manifest(
+    name: &str,
+    description: &str,
+    tool_sequence: Vec<String>,
+    confidence: f64,
+) -> String {
+    let candidate = sunday_agents::parsing::SkillCandidate {
+        name: name.to_string(),
+        description: description.to_string(),
+        tool_sequence,
+        confidence,
+    };
+    sunday_agents::parsing::generate_skill_manifest(&candidate)
+}
+
+// ---------------------------------------------------------------------------
+// User modeling / peer memory (Honcho-style)
+// ---------------------------------------------------------------------------
+
+/// UserModelStore — in-memory store for peer models.
+#[pyclass(name = "UserModelStore")]
+pub struct PyUserModelStore {
+    inner: sunday_agents::parsing::UserModelStore,
+}
+
+#[pymethods]
+impl PyUserModelStore {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: sunday_agents::parsing::UserModelStore::new(),
+        }
+    }
+
+    fn process_message(&mut self, peer_id: &str, message: &str) {
+        self.inner.process_message(peer_id, message);
+    }
+
+    fn get_prompt_context(&self, peer_id: &str, max_chars: usize) -> Option<String> {
+        self.inner.get_prompt_context(peer_id, max_chars)
+    }
+
+    fn get_peer_ids(&self) -> Vec<String> {
+        self.inner.all_peer_ids()
+    }
+
+    fn get_conclusion_count(&self, peer_id: &str) -> usize {
+        self.inner.get(peer_id).map(|m| m.conclusions.len()).unwrap_or(0)
     }
 }

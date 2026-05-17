@@ -9,6 +9,7 @@ use serde_json::Value;
 ///
 /// Works with any server exposing `/v1/chat/completions` and `/v1/models`
 /// (vLLM, SGLang, LlamaCpp, MLX, LM Studio).
+#[derive(Clone)]
 pub struct OpenAICompatEngine {
     engine_name: String,
     host: String,
@@ -267,7 +268,8 @@ impl InferenceEngine for OpenAICompatEngine {
         use futures::StreamExt;
         let byte_stream = resp.bytes_stream();
 
-        let token_stream = byte_stream.filter_map(|chunk_result| async {
+        let token_stream = byte_stream.flat_map(|chunk_result| {
+            let mut results = Vec::new();
             match chunk_result {
                 Ok(bytes) => {
                     let text = String::from_utf8_lossy(&bytes);
@@ -278,21 +280,15 @@ impl InferenceEngine for OpenAICompatEngine {
                         }
                         let json_str = line.strip_prefix("data: ").unwrap_or(line);
                         if let Ok(chunk) = serde_json::from_str::<Value>(json_str) {
-                            let content = chunk["choices"][0]["delta"]["content"]
-                                .as_str()
-                                .unwrap_or("")
-                                .to_string();
-                            if !content.is_empty() {
-                                return Some(Ok(content));
-                            }
+                            results.push(Ok(chunk));
                         }
                     }
-                    None
                 }
-                Err(e) => Some(Err(SUNDAYError::Engine(EngineError::Streaming(
+                Err(e) => results.push(Err(SUNDAYError::Engine(EngineError::Streaming(
                     e.to_string(),
                 )))),
             }
+            futures::stream::iter(results)
         });
 
         Ok(Box::pin(token_stream))

@@ -168,7 +168,7 @@ impl PyEventBus {
     #[pyo3(signature = (record_history=None))]
     fn new(record_history: Option<bool>) -> Self {
         Self {
-            inner: std::sync::Arc::new(sunday_core::EventBus::new(record_history.unwrap_or(true))),
+            inner: sunday_core::events::GLOBAL_BUS.clone(),
         }
     }
 

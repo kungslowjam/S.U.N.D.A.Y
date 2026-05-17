@@ -95,10 +95,6 @@ class ShellExecTool(BaseTool):
         # Autonomous Security Check
         is_trusted = os.environ.get("SUNDAY_TRUST_AGENT", "0") == "1"
         if not self._is_safe(command) and not is_trusted:
-            # If we have a confirm_callback (passed from ToolExecutor), use it
-            # But since we set requires_confirmation=False, we handle it here if needed
-            # For now, we allow it if SUNDAY_TRUST_AGENT is set, otherwise we block
-            # specifically sensitive commands if not safe.
             sensitive_keywords = ["rm ", "del ", "format ", "mkfs", "shutdown", "> /dev/"]
             if any(k in command.lower() for k in sensitive_keywords):
                 return ToolResult(
@@ -135,19 +131,7 @@ class ShellExecTool(BaseTool):
                     success=False,
                 )
 
-        # Build sanitised environment
-        env: dict[str, str] = {}
-        for key in _BASE_ENV_KEYS:
-            val = os.environ.get(key)
-            if val is not None:
-                env[key] = val
-
-        env_passthrough: List[str] = params.get("env_passthrough") or []
-        for key in env_passthrough:
-            val = os.environ.get(key)
-            if val is not None:
-                env[key] = val
-
+        # Prefer Rust backend
         try:
             from sunday._rust_bridge import get_rust_module
 
@@ -176,6 +160,21 @@ class ShellExecTool(BaseTool):
                     "working_dir": working_dir,
                 },
             )
+
+        # Python fallback
+        # Build sanitised environment
+        env: dict[str, str] = {}
+        for key in _BASE_ENV_KEYS:
+            val = os.environ.get(key)
+            if val is not None:
+                env[key] = val
+
+        env_passthrough: List[str] = params.get("env_passthrough") or []
+        for key in env_passthrough:
+            val = os.environ.get(key)
+            if val is not None:
+                env[key] = val
+
         try:
             result = subprocess.run(
                 command,

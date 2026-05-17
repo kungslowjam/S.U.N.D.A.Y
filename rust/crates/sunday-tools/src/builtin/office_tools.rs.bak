@@ -1,0 +1,226 @@
+//! Microsoft Office (Word & Excel) automation tools using Native Windows COM.
+
+use crate::traits::BaseTool;
+use sunday_core::{ToolResult, ToolSpec, SUNDAYError, ToolError};
+use serde_json::{Value, json};
+use once_cell::sync::Lazy;
+use std::collections::HashMap;
+
+// Windows API imports
+use windows::core::{GUID, PCWSTR, w, Result};
+use windows::Win32::System::Com::*;
+use windows::Win32::System::Ole::*;
+use windows::Win32::Foundation::{VARIANT_BOOL, E_POINTER, E_NOINTERFACE};
+use windows::Win32::System::Variant::{VARIANT, VARIANT_0, VARIANT_0_0, VARIANT_0_0_0};
+
+static WORD_SPEC: Lazy<ToolSpec> = Lazy::new(|| ToolSpec {
+    name: "word_write".into(),
+    description: "Create or update a Word document with text using Native COM".into(),
+    parameters: json!({
+        "type": "object",
+        "properties": {
+            "text": {
+                "type": "string",
+                "description": "The text to write to the document"
+            },
+            "path": {
+                "type": "string",
+                "description": "Optional path to save the document. If omitted, it stays open."
+            }
+        },
+        "required": ["text"]
+    }),
+    category: "office".into(),
+    cost_estimate: 0.0,
+    latency_estimate: 2.0,
+    requires_confirmation: true,
+    timeout_seconds: 60.0,
+    required_capabilities: vec!["office:write".into()],
+    metadata: HashMap::new(),
+});
+
+static EXCEL_SPEC: Lazy<ToolSpec> = Lazy::new(|| ToolSpec {
+    name: "excel_read".into(),
+    description: "Read data from an Excel workbook using Native COM".into(),
+    parameters: json!({
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Path to the .xlsx file"
+            },
+            "range": {
+                "type": "string",
+                "description": "The range to read (e.g., 'A1:B10')"
+            }
+        },
+        "required": ["path"]
+    }),
+    category: "office".into(),
+    cost_estimate: 0.0,
+    latency_estimate: 2.0,
+    requires_confirmation: false,
+    timeout_seconds: 60.0,
+    required_capabilities: vec!["office:read".into()],
+    metadata: HashMap::new(),
+});
+
+pub struct WordWriteTool;
+
+impl BaseTool for WordWriteTool {
+    fn tool_id(&self) -> &str {
+        "word_write"
+    }
+
+    fn spec(&self) -> &ToolSpec {
+        &WORD_SPEC
+    }
+
+    fn execute(&self, params: &Value) -> Result<ToolResult, SUNDAYError> {
+        let text = params["text"].as_str().ok_or_else(|| SUNDAYError::Tool(ToolError::InvalidParams("text is required".into())))?;
+        let path = params["path"].as_str();
+
+        let run = || -> Result<String> {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+                let clsid = CLSIDFromProgID(w!("Word.Application"))?;
+                let dispatch: IDispatch = CoCreateInstance(&clsid, None, CLSCTX_LOCAL_SERVER)?;
+
+                // Visible = true
+                let _ = set_property(&dispatch, "Visible", vec![VARIANT::from(VARIANT_BOOL::from(true))])?;
+
+                // Documents.Add()
+                let docs = get_property(&dispatch, "Documents")?;
+                let docs_dispatch = variant_to_dispatch(&docs)?;
+                let doc = call_method(docs_dispatch, "Add", vec![])?;
+                let doc_dispatch = variant_to_dispatch(&doc)?;
+
+                // Selection.TypeText(text)
+                let selection = get_property(&dispatch, "Selection")?;
+                let selection_dispatch = variant_to_dispatch(&selection)?;
+                let _ = call_method(selection_dispatch, "TypeText", vec![VARIANT::from(text)])?;
+
+                if let Some(p) = path {
+                    let _ = call_method(doc_dispatch, "SaveAs", vec![VARIANT::from(p)])?;
+                }
+
+                Ok(format!("Successfully wrote text to Word document.{}", path.map(|p| format!(" Saved to {}", p)).unwrap_or_default()))
+            }
+        };
+
+        match run() {
+            Ok(content) => Ok(ToolResult::success(self.tool_id(), content)),
+            Err(e) => Err(SUNDAYError::Tool(ToolError::Execution(format!("Word COM Error: {}", e)))),
+        }
+    }
+}
+
+pub struct ExcelReadTool;
+
+impl BaseTool for ExcelReadTool {
+    fn tool_id(&self) -> &str {
+        "excel_read"
+    }
+
+    fn spec(&self) -> &ToolSpec {
+        &EXCEL_SPEC
+    }
+
+    fn execute(&self, params: &Value) -> Result<ToolResult, SUNDAYError> {
+        let path = params["path"].as_str().ok_or_else(|| SUNDAYError::Tool(ToolError::InvalidParams("path is required".into())))?;
+        let range_str = params["range"].as_str().unwrap_or("A1:C10");
+
+        let run = || -> Result<String> {
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+
+                let clsid = CLSIDFromProgID(w!("Excel.Application"))?;
+                let dispatch: IDispatch = CoCreateInstance(&clsid, None, CLSCTX_LOCAL_SERVER)?;
+
+                let workbooks = get_property(&dispatch, "Workbooks")?;
+                let workbooks_dispatch = variant_to_dispatch(&workbooks)?;
+                let wb = wb_open(workbooks_dispatch, path)?;
+                let wb_dispatch = variant_to_dispatch(&wb)?;
+
+                let sheet = get_property(wb_dispatch, "ActiveSheet")?;
+                let sheet_dispatch = variant_to_dispatch(&sheet)?;
+
+                let range = get_range(sheet_dispatch, range_str)?;
+                let range_dispatch = variant_to_dispatch(&range)?;
+
+                let _value = get_property(range_dispatch, "Value")?;
+                
+                Ok(format!("Successfully read data from Excel range {} in {}.", range_str, path))
+            }
+        };
+
+        match run() {
+            Ok(content) => Ok(ToolResult::success(self.tool_id(), content)),
+            Err(e) => Err(SUNDAYError::Tool(ToolError::Execution(format!("Excel COM Error: {}", e)))),
+        }
+    }
+}
+
+// --- COM Helper Utilities ---
+
+unsafe fn variant_to_dispatch(v: &VARIANT) -> Result<&IDispatch> {
+    let vt = v.Anonymous.Anonymous.vt;
+    if vt == VT_DISPATCH.0 as u16 {
+        v.Anonymous.Anonymous.Anonymous.pdispVal.as_ref().ok_or_else(|| windows::core::Error::from_hresult(E_POINTER))
+    } else {
+        Err(windows::core::Error::from_hresult(E_NOINTERFACE))
+    }
+}
+
+unsafe fn get_property(dispatch: &IDispatch, name: &str) -> Result<VARIANT> {
+    let mut dispid = 0;
+    let name_w: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    dispatch.GetIDsOfNames(&GUID::default(), &PCWSTR(name_w.as_ptr()), 1, 0x0800, &mut dispid)?;
+
+    let mut params = DISPPARAMS::default();
+    let mut result = VARIANT::default();
+    dispatch.Invoke(dispid, &GUID::default(), 0x0800, DISPATCH_PROPERTYGET, &mut params, Some(&mut result), None, None)?;
+    Ok(result)
+}
+
+unsafe fn set_property(dispatch: &IDispatch, name: &str, args: Vec<VARIANT>) -> Result<VARIANT> {
+    let mut dispid = 0;
+    let name_w: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    dispatch.GetIDsOfNames(&GUID::default(), &PCWSTR(name_w.as_ptr()), 1, 0x0800, &mut dispid)?;
+
+    let mut dispid_named = DISPID_PROPERTYPUT;
+    let mut params = DISPPARAMS {
+        rgvarg: args.as_ptr() as *mut _,
+        rgdispidNamedArgs: &mut dispid_named,
+        cArgs: args.len() as u32,
+        cNamedArgs: 1,
+    };
+    let mut result = VARIANT::default();
+    dispatch.Invoke(dispid, &GUID::default(), 0x0800, DISPATCH_PROPERTYPUT, &mut params, Some(&mut result), None, None)?;
+    Ok(result)
+}
+
+unsafe fn call_method(dispatch: &IDispatch, name: &str, args: Vec<VARIANT>) -> Result<VARIANT> {
+    let mut dispid = 0;
+    let name_w: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    dispatch.GetIDsOfNames(&GUID::default(), &PCWSTR(name_w.as_ptr()), 1, 0x0800, &mut dispid)?;
+
+    let mut params = DISPPARAMS {
+        rgvarg: args.as_ptr() as *mut _,
+        rgdispidNamedArgs: std::ptr::null_mut(),
+        cArgs: args.len() as u32,
+        cNamedArgs: 0,
+    };
+    let mut result = VARIANT::default();
+    dispatch.Invoke(dispid, &GUID::default(), 0x0800, DISPATCH_METHOD, &mut params, Some(&mut result), None, None)?;
+    Ok(result)
+}
+
+unsafe fn wb_open(workbooks: &IDispatch, path: &str) -> Result<VARIANT> {
+    call_method(workbooks, "Open", vec![VARIANT::from(path)])
+}
+
+unsafe fn get_range(sheet: &IDispatch, range: &str) -> Result<VARIANT> {
+    call_method(sheet, "Range", vec![VARIANT::from(range)])
+}

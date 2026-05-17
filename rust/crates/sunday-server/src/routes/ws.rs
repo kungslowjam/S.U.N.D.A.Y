@@ -41,7 +41,6 @@ pub async fn agent_events_handler(
 
 async fn handle_agent_events(mut socket: axum::extract::ws::WebSocket, state: AppState) {
     use axum::extract::ws::Message;
-    use tokio::sync::broadcast;
 
     let mut rx = state.bus.subscribe();
 

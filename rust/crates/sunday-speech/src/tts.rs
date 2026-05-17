@@ -1,8 +1,7 @@
-use ort::session::{Session, SessionInputs};
+use ort::session::Session;
 use ndarray::Array2;
 use crate::AudioData;
 use anyhow::Result;
-use std::sync::Arc;
 
 /// High-performance TTS engine using Kokoro ONNX model.
 pub struct KokoroEngine {

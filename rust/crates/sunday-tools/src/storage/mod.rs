@@ -3,9 +3,11 @@
 pub mod backend_enum;
 pub mod bm25;
 pub mod colbert;
+pub mod embeddings;
 pub mod faiss;
 pub mod hybrid;
 pub mod knowledge_graph;
+pub mod pool;
 pub mod sqlite;
 pub mod traits;
 pub mod utils;

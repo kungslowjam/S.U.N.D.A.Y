@@ -940,9 +940,14 @@ pub fn load_config(path: Option<&Path>) -> Result<JarvisConfig, ConfigError> {
 
     let mut cfg = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path)?;
+        let raw: toml::Value = toml::from_str(&content)?;
         let mut cfg: JarvisConfig = toml::from_str(&content)?;
-        // If the TOML didn't set a default engine, use the recommended one
-        if cfg.engine.default == default_engine_name() || cfg.engine.default.is_empty() {
+        // Only override with the recommended engine if the user did not
+        // explicitly set `engine.default` in their config file.
+        let user_set_engine = raw.get("engine")
+            .and_then(|e| e.get("default"))
+            .is_some();
+        if !user_set_engine || cfg.engine.default.is_empty() {
             cfg.engine.default = recommended_engine;
         }
         cfg

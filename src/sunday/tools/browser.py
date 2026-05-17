@@ -14,8 +14,10 @@ import threading
 try:
     import sunday_rust
     HAS_RUST_BROWSER = hasattr(sunday_rust, "NativeBrowser")
+    HAS_RUST_MINER = hasattr(sunday_rust, "NativeMiner")
 except ImportError:
     HAS_RUST_BROWSER = False
+    HAS_RUST_MINER = False
 
 class PageProxy:
     """A compatibility layer that makes Rust NativeBrowser look like Playwright Page (and vice-versa)."""
@@ -1046,9 +1048,17 @@ class BrowserScreenshotTool(BaseTool):
 
     def execute(self, **params: Any) -> ToolResult:
         import os
-        # Find project root (4 levels up from this file: src/sunday/tools/browser.py)
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-        default_path = os.path.join(root, "last_screenshot.png")
+        import time
+        from pathlib import Path
+        
+        home = Path.home()
+        tmp_dir = home / ".sunday" / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        
+        timestamp = int(time.time() * 1000)
+        filename = f"screenshot_{timestamp}.jpg"
+        default_path = str(tmp_dir / filename)
+        
         path = params.get("path") or default_path
         full_page = params.get("full_page", False)
 
@@ -1059,19 +1069,24 @@ class BrowserScreenshotTool(BaseTool):
             with open(path, "wb") as f:
                 f.write(screenshot_bytes)
 
-            b64_data = base64.b64encode(screenshot_bytes).decode("utf-8")
-
             description = "Screenshot taken"
             if full_page:
                 description += " (full page)"
             if path:
                 description += f", saved to {path}"
 
+            # Construct file URI
+            clean_path = path.replace('\\', '/')
+            if clean_path.startswith('/'):
+                uri = f"file://{clean_path}"
+            else:
+                uri = f"file:///{clean_path}"
+
             return ToolResult(
                 tool_name="browser_screenshot",
                 content=description,
                 success=True,
-                metadata={"screenshot_base64": b64_data},
+                metadata={"screenshot_path": uri},
             )
         except ImportError:
             return ToolResult(
@@ -1148,88 +1163,97 @@ class BrowserExtractTool(BaseTool):
             page = _session.page
 
             if extract_type == "text":
-                raw = page.inner_text(selector)
-                
-                # ═══ Smart Content Cleaner ═══
-                # Strip common UI noise that drowns out actual data
-                import re as _re
-                lines = raw.split('\n')
-                cleaned_lines = []
-                skip_mode = False
-                
-                for line in lines:
-                    stripped = line.strip()
-                    if not stripped:
-                        continue
+                if HAS_RUST_MINER:
+                    try:
+                        html = page.inner_html(selector)
+                        miner = sunday_rust.NativeMiner()
+                        content = miner.mine_html(html)
+                    except Exception:
+                        raw = page.inner_text(selector)
+                        content = raw # fallback
+                else:
+                    raw = page.inner_text(selector)
                     
-                    # Skip calendar grids
-                    if stripped in ('Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'):
-                        skip_mode = True
-                        continue
-                    if skip_mode and _re.match(r'^\d{1,2}$', stripped):
-                        continue
-                    if skip_mode and stripped in ('Calendar', "I'm flexible", 'Exact dates'):
-                        continue
-                    if 'days' == stripped or stripped in ('1 day', '2 days', '3 days', '7 days'):
-                        skip_mode = False
-                        continue
-                    
-                    # Skip navigation noise
-                    noise_exact = {
-                        'Skip to main content', 'List your property', 'Register',
-                        'Sign in', 'Stays', 'Flights', 'Flight + Hotel', 'Car rental',
-                        'Attractions', 'Airport taxis', 'Home', 'Show on map',
-                        'Filter by:', 'Popular filters', 'Smart filters',
-                        'What are you looking for?', 'Find properties',
-                        'Property type', 'Property rating', 'Facilities',
-                        'Room facilities', 'Review score', 'Neighbourhood',
-                        'Travel group', 'Brands', 'Fun things to do',
-                        'Entire places', 'Certifications', 'Property accessibility',
-                        'Room accessibility', 'Show all 13', 'Show all 14',
-                        'Show all 20', 'Show all 25', 'List', 'Grid',
-                        'Find high-quality hotels and holiday rentals',
-                        "I'm travelling for work", 'Check-in date', 'Check-out date',
-                    }
-                    if stripped in noise_exact:
-                        continue
-                    
-                    # Skip filter counts like "Hotels\n262" or "5 stars\n10"
-                    if _re.match(r'^(Hotels|Apartments|Villas|Hostels|Ryokans|Guest houses|Chalets|Capsule hotels|Homestays|Holiday homes|Love hotels)\s*$', stripped):
-                        continue
-                    if _re.match(r'^\d{1,4}$', stripped) and len(stripped) <= 4:
-                        continue
-                    if _re.match(r'^\d+ stars?$', stripped):
-                        continue
-                    if _re.match(r'^(Superb|Very good|Good|Pleasant): \d\+$', stripped):
-                        continue
-                    
-                    # Skip accessibility/facility labels
-                    if any(kw in stripped.lower() for kw in [
-                        'wheelchair', 'grab rails', 'tactile signs', 'braille',
-                        'shower chair', 'roll-in shower', 'lowered sink', 'raised toilet',
-                        'emergency cord', 'elevator', 'ground floor', 'adapted bath',
-                        'walk-in shower', 'auditory guidance', 'sustainability',
-                        'massage chair', 'bicycle rental', 'entire homes',
-                        'pets allowed', 'adults only', 'lgbtq'
-                    ]):
-                        continue
-                    
-                    # Skip brand names
-                    if any(brand in stripped for brand in [
-                        'APA Hotels', 'Tokyu Stay', 'LiveMax', 'WHG HOTELS',
-                        'Citadines', 'Pan Pacific', 'Toyoko Inn', 'Hilton',
-                        'Daiwa Roynet', 'Iconia'
-                    ]):
-                        continue
-                    
-                    # Skip currency/locale buttons
-                    if stripped in ('AUD', 'USD', 'EUR', 'GBP', 'JPY'):
-                        continue
-                    
+                    # ═══ Smart Content Cleaner ═══
+                    # Strip common UI noise that drowns out actual data
+                    import re as _re
+                    lines = raw.split('\n')
+                    cleaned_lines = []
                     skip_mode = False
-                    cleaned_lines.append(stripped)
-                
-                content = '\n'.join(cleaned_lines)
+                    
+                    for line in lines:
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        
+                        # Skip calendar grids
+                        if stripped in ('Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'):
+                            skip_mode = True
+                            continue
+                        if skip_mode and _re.match(r'^\d{1,2}$', stripped):
+                            continue
+                        if skip_mode and stripped in ('Calendar', "I'm flexible", 'Exact dates'):
+                            continue
+                        if 'days' == stripped or stripped in ('1 day', '2 days', '3 days', '7 days'):
+                            skip_mode = False
+                            continue
+                        
+                        # Skip navigation noise
+                        noise_exact = {
+                            'Skip to main content', 'List your property', 'Register',
+                            'Sign in', 'Stays', 'Flights', 'Flight + Hotel', 'Car rental',
+                            'Attractions', 'Airport taxis', 'Home', 'Show on map',
+                            'Filter by:', 'Popular filters', 'Smart filters',
+                            'What are you looking for?', 'Find properties',
+                            'Property type', 'Property rating', 'Facilities',
+                            'Room facilities', 'Review score', 'Neighbourhood',
+                            'Travel group', 'Brands', 'Fun things to do',
+                            'Entire places', 'Certifications', 'Property accessibility',
+                            'Room accessibility', 'Show all 13', 'Show all 14',
+                            'Show all 20', 'Show all 25', 'List', 'Grid',
+                            'Find high-quality hotels and holiday rentals',
+                            "I'm travelling for work", 'Check-in date', 'Check-out date',
+                        }
+                        if stripped in noise_exact:
+                            continue
+                        
+                        # Skip filter counts like "Hotels\n262" or "5 stars\n10"
+                        if _re.match(r'^(Hotels|Apartments|Villas|Hostels|Ryokans|Guest houses|Chalets|Capsule hotels|Homestays|Holiday homes|Love hotels)\s*$', stripped):
+                            continue
+                        if _re.match(r'^\d{1,4}$', stripped) and len(stripped) <= 4:
+                            continue
+                        if _re.match(r'^\d+ stars?$', stripped):
+                            continue
+                        if _re.match(r'^(Superb|Very good|Good|Pleasant): \d\+$', stripped):
+                            continue
+                        
+                        # Skip accessibility/facility labels
+                        if any(kw in stripped.lower() for kw in [
+                            'wheelchair', 'grab rails', 'tactile signs', 'braille',
+                            'shower chair', 'roll-in shower', 'lowered sink', 'raised toilet',
+                            'emergency cord', 'elevator', 'ground floor', 'adapted bath',
+                            'walk-in shower', 'auditory guidance', 'sustainability',
+                            'massage chair', 'bicycle rental', 'entire homes',
+                            'pets allowed', 'adults only', 'lgbtq'
+                        ]):
+                            continue
+                        
+                        # Skip brand names
+                        if any(brand in stripped for brand in [
+                            'APA Hotels', 'Tokyu Stay', 'LiveMax', 'WHG HOTELS',
+                            'Citadines', 'Pan Pacific', 'Toyoko Inn', 'Hilton',
+                            'Daiwa Roynet', 'Iconia'
+                        ]):
+                            continue
+                        
+                        # Skip currency/locale buttons
+                        if stripped in ('AUD', 'USD', 'EUR', 'GBP', 'JPY'):
+                            continue
+                        
+                        skip_mode = False
+                        cleaned_lines.append(stripped)
+                    
+                    content = '\n'.join(cleaned_lines)
                 
                 if len(content) > 3000:
                     content = content[:3000] + "\n\n[Content truncated]"

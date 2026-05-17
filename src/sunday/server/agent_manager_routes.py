@@ -675,39 +675,85 @@ async def _stream_managed_agent(
 
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
 
-    # For deep_research agents: run the full agent loop, not raw streaming
-    if agent_type == "deep_research" and app_state is not None:
-        dr_tools = getattr(app_state, "_dr_tools", None)
-        if dr_tools:
+    # For autonomous agents (including native Rust agents): run the full agent loop, not raw streaming
+    native_agents = {"orchestrator", "monitor_operative", "native_react", "native_openhands"}
+    if agent_type == "deep_research" or agent_type in native_agents:
 
-            async def generate_deep_research():
-                """Run DeepResearchAgent in thread, stream progress + result."""
-                import asyncio
-                import queue
-                import threading
-                import time as _dr_time
+        async def generate_autonomous_agent():
+            """Run AutonomousAgent in thread, stream progress + result."""
+            import asyncio
+            import queue
+            import threading
+            import time as _dr_time
 
-                from sunday.agents.deep_research import DeepResearchAgent
+            progress_q: queue.Queue = queue.Queue()
 
-                progress_q: queue.Queue = queue.Queue()
+            # Log query start
+            _dr_start = _dr_time.time()
+            try:
+                manager.add_learning_log(
+                    agent_id,
+                    "query_start",
+                    f"Query: {user_content[:100]}",
+                    {"full_query": user_content},
+                )
+            except Exception as _log_exc:
+                logger.warning(
+                    "Failed to log query_start: %s",
+                    _log_exc,
+                )
 
-                # Log query start
-                _dr_start = _dr_time.time()
+            def _run_agent():
+                agent_metadata = {}
                 try:
+                    result = agent_instance.run(user_content)
+                    content = result.content or "No results found."
+                    agent_metadata = getattr(result, "metadata", {})
+                except Exception as exc:
+                    content = f"Error: {exc}"
+
+                elapsed = _dr_time.time() - _dr_start
+
+                # Log BEFORE queue put (put triggers SSE end)
+                try:
+                    is_err = content.startswith("Error:")
                     manager.add_learning_log(
                         agent_id,
-                        "query_start",
-                        f"Query: {user_content[:100]}",
-                        {"full_query": user_content},
+                        "query_error" if is_err else "query_complete",
+                        f"{'Error' if is_err else 'Response'}: "
+                        f"{len(content)} chars in {elapsed:.1f}s",
+                        {
+                            "response_length": len(content),
+                            "elapsed_seconds": round(elapsed, 2),
+                        },
                     )
-                except Exception as _log_exc:
+                except Exception as _qc_exc:
                     logger.warning(
-                        "Failed to log query_start: %s",
-                        _log_exc,
+                        "Log failed: %s",
+                        _qc_exc,
                     )
 
-                # Patch the agent's tool executor to emit progress
-                dr_agent = DeepResearchAgent(
+                progress_q.put(
+                    {
+                        "type": "error" if content.startswith("Error:") else "done",
+                        "content": content,
+                        "metadata": agent_metadata,
+                        "elapsed": elapsed,
+                    }
+                )
+
+            agent_instance = None
+            bus_unsub_callbacks = []
+
+            if agent_type == "deep_research":
+                from sunday.agents.deep_research import DeepResearchAgent
+                dr_tools = getattr(app_state, "_dr_tools", None)
+                if not dr_tools:
+                    progress_q.put({"type": "error", "content": "Error: deep_research tools missing."})
+                    yield "data: [DONE]\n\n"
+                    return
+                
+                agent_instance = DeepResearchAgent(
                     engine=engine,
                     model=model,
                     tools=dr_tools,
@@ -717,14 +763,12 @@ async def _stream_managed_agent(
                     confirm_callback=lambda _prompt: True,
                 )
 
-                # Wrap the executor to capture tool calls
-                original_execute = dr_agent._executor.execute
+                original_execute = agent_instance._executor.execute
 
                 def _tracked_execute(tc):
                     tool_name = tc.name
                     full_args = tc.arguments or ""
                     args_str = full_args[:80]
-                    # Log tool call start
                     try:
                         manager.add_learning_log(
                             agent_id,
@@ -747,7 +791,6 @@ async def _stream_managed_agent(
                     result = original_execute(tc)
                     _tool_latency_ms = (_dr_time.monotonic() - _tool_start) * 1000
 
-                    # Log tool result
                     try:
                         _ok = "succeeded" if result.success else "failed"
                         _clen = len(result.content) if result.content else 0
@@ -776,181 +819,193 @@ async def _stream_managed_agent(
                     )
                     return result
 
-                dr_agent._executor.execute = _tracked_execute
-
-                def _run_agent():
-                    agent_metadata = {}
-                    try:
-                        result = dr_agent.run(user_content)
-                        content = result.content or "No results found."
-                        agent_metadata = result.metadata or {}
-                    except Exception as exc:
-                        content = f"Error: {exc}"
-
-                    elapsed = _dr_time.time() - _dr_start
-
-                    # Log BEFORE queue put (put triggers SSE end)
-                    try:
-                        is_err = content.startswith("Error:")
-                        manager.add_learning_log(
-                            agent_id,
-                            "query_error" if is_err else "query_complete",
-                            f"{'Error' if is_err else 'Response'}: "
-                            f"{len(content)} chars in {elapsed:.1f}s",
-                            {
-                                "response_length": len(content),
-                                "elapsed_seconds": round(elapsed, 2),
-                            },
-                        )
-                    except Exception as _qc_exc:
-                        logger.warning(
-                            "Log failed: %s",
-                            _qc_exc,
-                        )
-
-                    progress_q.put(
-                        {
-                            "type": "error" if content.startswith("Error:") else "done",
-                            "content": content,
-                            "metadata": agent_metadata,
-                            "elapsed": elapsed,
-                        }
+                agent_instance._executor.execute = _tracked_execute
+            else:
+                import json
+                from sunday.core.events import get_event_bus, EventType
+                
+                engine_key = config.get("engine", "ollama")
+                sys_prompt = config.get("system_prompt", "")
+                
+                if agent_type == "orchestrator":
+                    from sunday.agents.orchestrator import OrchestratorAgent
+                    agent_instance = OrchestratorAgent(
+                        engine_key=engine_key, host="http://localhost:11434", model=model,
+                        system_prompt=sys_prompt,
+                        max_turns=int(config.get("max_turns", 8)),
+                        temperature=float(config.get("temperature", 0.3))
+                    )
+                elif agent_type == "native_react":
+                    from sunday.agents.native_react import NativeReActAgent
+                    agent_instance = NativeReActAgent(
+                        engine_key=engine_key, host="http://localhost:11434", model=model,
+                        max_turns=int(config.get("max_turns", 8)),
+                        temperature=float(config.get("temperature", 0.3))
+                    )
+                elif agent_type == "monitor_operative":
+                    from sunday.agents.monitor_operative import MonitorOperativeAgent
+                    agent_instance = MonitorOperativeAgent(
+                        engine_key=engine_key, host="http://localhost:11434", model=model,
+                        max_turns=int(config.get("max_turns", 8)),
+                        temperature=float(config.get("temperature", 0.3))
+                    )
+                else: # native_openhands
+                    from sunday.agents.native_openhands import NativeOpenHandsAgent
+                    agent_instance = NativeOpenHandsAgent(
+                        engine_key=engine_key, host="http://localhost:11434", model=model,
+                        max_turns=int(config.get("max_turns", 8)),
+                        temperature=float(config.get("temperature", 0.3))
                     )
 
-                thread = threading.Thread(target=_run_agent, daemon=True)
-                thread.start()
+                def on_tool_start(event):
+                    tool = event.data.get("tool_name", "unknown")
+                    args_dict = event.data.get("arguments", {})
+                    if isinstance(args_dict, dict):
+                        full_args = json.dumps(args_dict)
+                    else:
+                        full_args = str(args_dict)
+                    progress_q.put({"type": "tool_start", "tool": tool, "args": full_args[:80], "full_args": full_args})
 
-                # Collect tool calls from deep-research so we can persist them
-                # alongside the final response (and the UI can re-render them
-                # after a page reload).
-                dr_tool_calls: List[Dict[str, Any]] = []
-                _pending_dr_starts: Dict[str, str] = {}
+                def on_tool_end(event):
+                    tool = event.data.get("tool_name", "unknown")
+                    succ = event.data.get("success", False)
+                    res = event.data.get("result", "")
+                    lat = event.data.get("duration_seconds", 0) * 1000
+                    progress_q.put({"type": "tool_end", "tool": tool, "arguments": "{}", "success": succ, "latency": lat, "result": res})
 
-                # Stream progress events and final content
-                while True:
-                    try:
-                        event = await asyncio.to_thread(progress_q.get, timeout=600)
-                    except Exception:
-                        # Timeout
-                        yield _sse_chunk(chunk_id, model, "Agent timed out.")
-                        break
+                bus = get_event_bus()
+                bus.subscribe(EventType.TOOL_CALL_START, on_tool_start)
+                bus.subscribe(EventType.TOOL_CALL_END, on_tool_end)
+                bus_unsub_callbacks.append((EventType.TOOL_CALL_START, on_tool_start))
+                bus_unsub_callbacks.append((EventType.TOOL_CALL_END, on_tool_end))
 
-                    if event["type"] == "tool_start":
-                        tool = event["tool"]
-                        args = event.get("args", "")
-                        full_args = event.get("full_args", "")
-                        _pending_dr_starts[tool] = full_args
-                        # Structured event so the UI can render a tool_call
-                        # message card (same shape as the non-DR path).
-                        _start_payload = json.dumps(
-                            {"tool": tool, "arguments": full_args}
-                        )
-                        yield f"event: tool_call_start\ndata: {_start_payload}\n\n"
-                        # Keep the human-readable progress label for the
-                        # thinking-bubble fallback.
-                        label = _tool_progress_label(tool, args)
-                        progress_data = {
-                            "id": chunk_id,
-                            "object": "chat.completion.chunk",
-                            "model": model,
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": {},
-                                    "finish_reason": None,
-                                    "tool_progress": label,
-                                }
-                            ],
-                        }
-                        yield f"data: {json.dumps(progress_data)}\n\n"
+            thread = threading.Thread(target=_run_agent, daemon=True)
+            thread.start()
 
-                    elif event["type"] == "tool_end":
-                        tool = event["tool"]
-                        dr_tool_calls.append(
+            dr_tool_calls: List[Dict[str, Any]] = []
+            _pending_dr_starts: Dict[str, str] = {}
+
+            # Stream progress events and final content
+            while True:
+                try:
+                    event = await asyncio.to_thread(progress_q.get, timeout=600)
+                except Exception:
+                    yield _sse_chunk(chunk_id, model, "Agent timed out.")
+                    break
+
+                if event["type"] == "tool_start":
+                    tool = event["tool"]
+                    args = event.get("args", "")
+                    full_args = event.get("full_args", "")
+                    _pending_dr_starts[tool] = full_args
+                    _start_payload = json.dumps(
+                        {"tool": tool, "arguments": full_args}
+                    )
+                    yield f"event: tool_call_start\ndata: {_start_payload}\n\n"
+                    label = _tool_progress_label(tool, args)
+                    progress_data = {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "model": model,
+                        "choices": [
                             {
-                                "tool": tool,
-                                "arguments": event.get(
-                                    "arguments", _pending_dr_starts.get(tool, "")
-                                ),
-                                "result": event.get("result", ""),
-                                "success": bool(event.get("success", False)),
-                                "latency": float(event.get("latency", 0.0)),
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": None,
+                                "tool_progress": label,
                             }
-                        )
-                        _pending_dr_starts.pop(tool, None)
-                        _end_payload = json.dumps(
-                            {
-                                "tool": tool,
-                                "success": bool(event.get("success", False)),
-                                "latency": float(event.get("latency", 0.0)),
-                                "result": event.get("result", ""),
-                            }
-                        )
-                        yield f"event: tool_call_end\ndata: {_end_payload}\n\n"
+                        ],
+                    }
+                    yield f"data: {json.dumps(progress_data)}\n\n"
 
-                    elif event["type"] in ("done", "error"):
-                        content = event["content"]
-                        meta = event.get("metadata", {})
-                        elapsed_s = event.get("elapsed", 0)
-
-                        # Stream content word-by-word
-                        words = content.split(" ")
-                        for i, word in enumerate(words):
-                            token = word if i == 0 else " " + word
-                            yield _sse_chunk(chunk_id, model, token)
-
-                        # Build usage + telemetry
-                        prompt_tok = meta.get("prompt_tokens", 0)
-                        comp_tok = meta.get("completion_tokens", 0)
-                        total_tok = meta.get("total_tokens", 0)
-                        word_count = len(words)
-                        speed = round(word_count / elapsed_s) if elapsed_s > 0 else 0
-
-                        # Final chunk with usage + telemetry
-                        finish_data = {
-                            "id": chunk_id,
-                            "object": "chat.completion.chunk",
-                            "model": model,
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": {},
-                                    "finish_reason": "stop",
-                                }
-                            ],
-                            "usage": {
-                                "prompt_tokens": prompt_tok,
-                                "completion_tokens": comp_tok,
-                                "total_tokens": total_tok or (prompt_tok + comp_tok),
-                            },
-                            "telemetry": {
-                                "engine": "ollama",
-                                "model_id": model,
-                                "total_ms": round(elapsed_s * 1000),
-                                "tokens_per_sec": speed,
-                                "tool_calls": len(meta.get("sources", [])),
-                            },
+                elif event["type"] == "tool_end":
+                    tool = event["tool"]
+                    dr_tool_calls.append(
+                        {
+                            "tool": tool,
+                            "arguments": event.get(
+                                "arguments", _pending_dr_starts.get(tool, "")
+                            ),
+                            "result": event.get("result", ""),
+                            "success": bool(event.get("success", False)),
+                            "latency": float(event.get("latency", 0.0)),
                         }
-                        yield f"data: {json.dumps(finish_data)}\n\n"
-                        yield "data: [DONE]\n\n"
+                    )
+                    _pending_dr_starts.pop(tool, None)
+                    _end_payload = json.dumps(
+                        {
+                            "tool": tool,
+                            "success": bool(event.get("success", False)),
+                            "latency": float(event.get("latency", 0.0)),
+                            "result": event.get("result", ""),
+                        }
+                    )
+                    yield f"event: tool_call_end\ndata: {_end_payload}\n\n"
 
-                        # Persist (with the tool calls captured during
-                        # the deep-research turn so they survive reload).
-                        manager.store_agent_response(
-                            agent_id,
-                            content,
-                            tool_calls=dr_tool_calls or None,
-                        )
-                        break
+                elif event["type"] in ("done", "error"):
+                    content = event["content"]
+                    meta = event.get("metadata", {})
+                    elapsed_s = event.get("elapsed", 0)
 
-            return StreamingResponse(
-                generate_deep_research(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                },
-            )
+                    words = content.split(" ")
+                    for i, word in enumerate(words):
+                        token = word if i == 0 else " " + word
+                        yield _sse_chunk(chunk_id, model, token)
+
+                    prompt_tok = meta.get("prompt_tokens", 0)
+                    comp_tok = meta.get("completion_tokens", 0)
+                    total_tok = meta.get("total_tokens", 0)
+                    word_count = len(words)
+                    speed = round(word_count / elapsed_s) if elapsed_s > 0 else 0
+
+                    finish_data = {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {},
+                                "finish_reason": "stop",
+                            }
+                        ],
+                        "usage": {
+                            "prompt_tokens": prompt_tok,
+                            "completion_tokens": comp_tok,
+                            "total_tokens": total_tok or (prompt_tok + comp_tok),
+                        },
+                        "telemetry": {
+                            "engine": "ollama",
+                            "model_id": model,
+                            "total_ms": round(elapsed_s * 1000),
+                            "tokens_per_sec": speed,
+                            "tool_calls": len(meta.get("sources", [])),
+                        },
+                    }
+                    yield f"data: {json.dumps(finish_data)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                    manager.store_agent_response(
+                        agent_id,
+                        content,
+                        tool_calls=dr_tool_calls or None,
+                    )
+                    break
+
+            if bus_unsub_callbacks:
+                from sunday.core.events import get_event_bus
+                bus = get_event_bus()
+                for etype, cb in bus_unsub_callbacks:
+                    bus.unsubscribe(etype, cb)
+
+        return StreamingResponse(
+            generate_autonomous_agent(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
 
     # Build extra kwargs for stream_full (e.g. tools from config).
     # Template stores tool names as strings; convert to OpenAI function specs

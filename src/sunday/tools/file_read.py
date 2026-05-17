@@ -108,6 +108,9 @@ class FileReadTool(BaseTool):
                 content=f"File too large: {size} bytes (max {_MAX_SIZE_BYTES}).",
                 success=False,
             )
+
+        # Prefer Rust backend
+        text: str = ""
         try:
             from sunday._rust_bridge import get_rust_module
 
@@ -124,6 +127,7 @@ class FileReadTool(BaseTool):
                 content=f"Read error: {exc}",
                 success=False,
             )
+
         max_lines = params.get("max_lines")
         if max_lines is not None and max_lines > 0:
             lines = text.splitlines(keepends=True)

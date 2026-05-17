@@ -6,7 +6,7 @@ $LlamaCppPath = "$ProjectRoot\llama-cpp"
 $DefaultHfModel = "llmfan46/gemma-4-E2B-it-ultra-uncensored-heretic-GGUF:Q4_K_M"
 $DefaultHfFile = "gemma-4-E2B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
 $DefaultLocalGemma = ".\models\Qwen3.5-9B-DeepSeek-V4-Flash-Q4_K_S.gguf"
-$DefaultFallbackModel = ".\models\MiniCPM-o-4_5-Q4_K_M.gguf"
+$DefaultFallbackModel = ".\models\Qwen3.5-9B-DeepSeek-V4-Flash-Q4_K_S.gguf"
 $ModelSource = if ($env:SUNDAY_MODEL_SOURCE) { $env:SUNDAY_MODEL_SOURCE } elseif (Test-Path (Join-Path $LlamaCppPath $DefaultLocalGemma)) { "local" } else { "hf" }
 $ModelPath = if ($env:SUNDAY_MODEL_PATH) { $env:SUNDAY_MODEL_PATH } elseif (Test-Path (Join-Path $LlamaCppPath $DefaultLocalGemma)) { $DefaultLocalGemma } else { $DefaultFallbackModel }
 $HfModel = if ($env:SUNDAY_HF_MODEL) { $env:SUNDAY_HF_MODEL } else { $DefaultHfModel }
@@ -140,46 +140,40 @@ function Clear-Discord {
     }
 }
 
-# 0. Build Rust Bridge (High Performance Layer)
-Write-Host "[0/4] Checking Rust Bridge (sunday_rust)..." -ForegroundColor Cyan
+# 0. Build Rust Core (High Performance Layer)
+Write-Host "[0/3] Checking Rust Core..." -ForegroundColor Cyan
 $StepStart = Get-Date
 try {
     # Check if rustc is available
     if (Get-Command rustc -ErrorAction SilentlyContinue) {
-        Write-Host "       Rust compiler found. Ensuring sunday_rust is built..." -ForegroundColor DarkGray
-        $MaturinPath = "$ProjectRoot\.venv\Scripts\maturin.exe"
-        if (Test-Path $MaturinPath) {
-            # Run maturin develop on the specific python bridge crate
-            Set-Location -Path "$ProjectRoot\rust"
-            & $MaturinPath develop --release -m crates/sunday-python/Cargo.toml
-            if ($LASTEXITCODE -ne 0) { 
-                Set-Location -Path $ProjectRoot
-                throw "💥 Maturin build failed. Please check the errors above." 
-            }
+        Write-Host "       Rust compiler found. Ensuring everything is built..." -ForegroundColor DarkGray
+        Set-Location -Path "$ProjectRoot\rust"
+        & cargo build --release
+        if ($LASTEXITCODE -ne 0) { 
             Set-Location -Path $ProjectRoot
-            Write-Host "       [OK] Rust Bridge is built and ready." -ForegroundColor Green
-        } else {
-            Write-Host "       [SKIP] maturin not found in .venv. Skipping auto-build." -ForegroundColor Yellow
+            throw "💥 Rust build failed. Please check the errors above." 
         }
+        Set-Location -Path $ProjectRoot
+        Write-Host "       [OK] Rust Core is built and ready." -ForegroundColor Green
     } else {
-        Write-Host "       [SKIP] Rust compiler (rustc) not found. Please install from https://rustup.rs/ if needed." -ForegroundColor Yellow
+        throw "💥 Rust compiler (rustc) not found. Please install from https://rustup.rs/"
     }
 } catch {
-    Write-Host "       [WARN] Rust build step failed: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "       [ERROR] Rust build step failed: $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
 }
 Write-Elapsed $StepStart
 
 Clear-Port $LlamaPort "AI Engine"
-Clear-Port $BackendPort "SUNDAY Backend"
+Clear-Port $BackendPort "SUNDAY Server (Rust)"
 Clear-Port $FrontendPort "Frontend Dashboard"
-Clear-Discord
 if ($StartVoiceLive) {
     Clear-Port $VoiceLlamaPort "Voice LLM"
     Clear-Port $VoiceLivePort "Voice Live Overlay"
 }
 
 # 1. Start Llama-Server (AI Core)
-Write-Host "[1/4] Starting AI Engine (llama-server) on port $LlamaPort..." -ForegroundColor Cyan
+Write-Host "[1/3] Starting AI Engine (llama-server) on port $LlamaPort..." -ForegroundColor Cyan
 $StepStart = Get-Date
 if (Test-Http "http://127.0.0.1:$LlamaPort/v1/models" 2) {
     Write-Host "[SKIP] AI Engine is already running." -ForegroundColor Yellow
@@ -208,27 +202,26 @@ if (Test-Http "http://127.0.0.1:$LlamaPort/v1/models" 2) {
 Write-Elapsed $StepStart
 Write-Host "[OK] AI Engine is ready." -ForegroundColor Green
 
-# 2. Start SUNDAY Backend
-Write-Host "[2/4] Starting SUNDAY Backend on port $BackendPort..." -ForegroundColor Cyan
+# 2. Start SUNDAY Rust Server
+Write-Host "[2/3] Starting SUNDAY Native Server on port $BackendPort..." -ForegroundColor Cyan
 $StepStart = Get-Date
-$SundayExe = "$ProjectRoot\.venv\Scripts\sunday.exe"
 if (Test-Http "http://127.0.0.1:$BackendPort/v1/models" 2) {
-    Write-Host "[SKIP] SUNDAY Backend is already running." -ForegroundColor Yellow
+    Write-Host "[SKIP] SUNDAY Server is already running." -ForegroundColor Yellow
 } else {
-    # 🧠 Use 'multi' engine for hybrid support and explicitly set agent to 'orchestrator'
-    Start-ServiceProcess -Command "`$env:OPENSUNDAY_CONFIG='$ConfigPath'; & '$SundayExe' serve --engine multi --agent orchestrator --host 127.0.0.1 --port $BackendPort" -WorkingDirectory $ProjectRoot
+    # 🧠 Run Rust Server via cargo run or release binary
+    Start-ServiceProcess -Command "cd '$ProjectRoot\rust'; `$env:SUNDAY_PORT='$BackendPort'; cargo run --release -p sunday-server" -WorkingDirectory $ProjectRoot
     Wait-ForHttp "http://127.0.0.1:$BackendPort/v1/models" 90
 }
 Write-Elapsed $StepStart
-Write-Host "[OK] SUNDAY Backend is ready." -ForegroundColor Green
+Write-Host "[OK] SUNDAY Server is ready." -ForegroundColor Green
 
 # 3. Start Frontend
-Write-Host "[3/4] Starting Frontend Dashboard on port $FrontendPort..." -ForegroundColor Cyan
+Write-Host "[3/3] Starting Frontend Dashboard on port $FrontendPort..." -ForegroundColor Cyan
 $StepStart = Get-Date
 if (Test-Http "http://127.0.0.1:$FrontendPort" 2) {
     Write-Host "[SKIP] Frontend Dashboard is already running." -ForegroundColor Yellow
 } else {
-    # 🧠 Run Frontend in Hidden mode by default to reduce clutter
+    # 🧠 Run Frontend in Hidden mode by default
     Start-Process powershell -ArgumentList "-NoExit", "-Command", "npm run dev" -WorkingDirectory "$ProjectRoot\frontend" -WindowStyle Hidden
     Wait-ForHttp "http://127.0.0.1:$FrontendPort" 120
 }
@@ -237,39 +230,14 @@ Write-Host "[OK] Frontend is ready." -ForegroundColor Green
 
 # 4. Start Voice Live Overlay (optional sidecar)
 if ($StartVoiceLive) {
-    Write-Host "[4/4] Starting Voice Live Overlay on port $VoiceLivePort..." -ForegroundColor Cyan
-    $StepStart = Get-Date
-    # 🧠 Run Voice Live in Hidden mode
-    $env:SUNDAY_CONSOLE_STYLE = "Hidden"
+    Write-Host "[SIDE] Starting Voice Live Overlay..." -ForegroundColor DarkGray
     & "$ProjectRoot\voice-live\start_voice_live.ps1"
-    Write-Elapsed $StepStart
-    Write-Host "[OK] Voice Live is ready." -ForegroundColor Green
-} else {
-    Write-Host "[4/4] Voice Live disabled (SUNDAY_VOICE_LIVE=0)." -ForegroundColor Yellow
 }
 
-# 5. Start Discord Daemon (optional)
-$DiscordToken = if ($env:DISCORD_BOT_TOKEN) { $env:DISCORD_BOT_TOKEN } else { 
-    # Try to extract from .env if present
-    if (Test-Path "$ProjectRoot\.env") {
-        $EnvFile = Get-Content "$ProjectRoot\.env"
-        $TokenLine = $EnvFile | Where-Object { $_ -match "^DISCORD_BOT_TOKEN=" }
-        if ($TokenLine) { $TokenLine.Split("=")[1].Trim() }
-    }
-}
-
+# 5. Start Discord Daemon (Rust Version)
 if ($DiscordToken) {
-    Write-Host "[5/5] Starting Discord Daemon..." -ForegroundColor Cyan
-    $StepStart = Get-Date
-    
-    $PythonExe = "$ProjectRoot\.venv\Scripts\python.exe"
-    # Use the same model as the main engine
-    Start-ServiceProcess -Command "`$env:PYTHONPATH='$ProjectRoot\src'; & '$PythonExe' -m sunday.channels.discord_daemon --bot-token '$DiscordToken' --model '$ModelName'" -WorkingDirectory $ProjectRoot
-    
-    Write-Elapsed $StepStart
-    Write-Host "[OK] Discord Daemon is starting." -ForegroundColor Green
-} else {
-    Write-Host "[5/5] Discord Daemon skipped (No DISCORD_BOT_TOKEN found)." -ForegroundColor Yellow
+    Write-Host "[SIDE] Starting Discord Daemon (Rust)..." -ForegroundColor DarkGray
+    Start-ServiceProcess -Command "cd '$ProjectRoot\rust'; `$env:DISCORD_BOT_TOKEN='$DiscordToken'; cargo run --release -p sunday-discord" -WorkingDirectory $ProjectRoot
 }
 
 # 6. Open Browser

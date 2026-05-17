@@ -34,6 +34,43 @@ impl ToolExecutor {
         }
     }
 
+    pub fn with_builtins(
+        capability_policy: Option<CapabilityPolicy>,
+        path_guard: Option<sunday_security::capabilities::PathGuard>,
+        bus: Option<Arc<EventBus>>,
+    ) -> Self {
+        let mut exec = Self::new(capability_policy, path_guard, bus);
+        
+        use crate::builtin::*;
+        exec.register(BuiltinTool::ApplyPatch(ApplyPatchTool));
+        exec.register(BuiltinTool::BrowserNavigate(BrowserNavigateTool));
+        exec.register(BuiltinTool::BrowserScreenshot(BrowserScreenshotTool));
+        exec.register(BuiltinTool::BrowserClick(BrowserClickTool));
+        exec.register(BuiltinTool::BrowserType(BrowserTypeTool));
+        exec.register(BuiltinTool::BrowserViewTree(BrowserViewTreeTool));
+        exec.register(BuiltinTool::Calculator(CalculatorTool));
+        exec.register(BuiltinTool::Think(ThinkTool));
+        exec.register(BuiltinTool::FileEdit(FileEditTool));
+        exec.register(BuiltinTool::FileRead(FileReadTool));
+        exec.register(BuiltinTool::FileReadMultiple(FileReadMultipleTool));
+        exec.register(BuiltinTool::FileWrite(FileWriteTool));
+        exec.register(BuiltinTool::FileGrep(FileGrepTool));
+        exec.register(BuiltinTool::ListDirectory(ListDirectoryTool));
+        exec.register(BuiltinTool::ShellExec(ShellExecTool));
+        exec.register(BuiltinTool::HttpRequest(HttpRequestTool));
+        exec.register(BuiltinTool::WebSearch(WebSearchTool));
+        exec.register(BuiltinTool::GitStatus(GitStatusTool));
+        exec.register(BuiltinTool::GitDiff(GitDiffTool));
+        exec.register(BuiltinTool::GitLog(GitLogTool));
+        exec.register(BuiltinTool::GitCommit(GitCommitTool));
+        exec.register(BuiltinTool::CryptoPrice(CryptoPriceTool));
+        exec.register(BuiltinTool::WebFetch(WebFetchTool));
+        exec.register(BuiltinTool::SystemHealth(SystemHealthTool));
+        exec.register(BuiltinTool::ScanChunks(ScanChunksTool));
+        
+        exec
+    }
+
     pub fn register(&mut self, tool: BuiltinTool) {
         let id = tool.tool_id().to_string();
         self.tools.insert(id, tool);
@@ -104,7 +141,8 @@ impl ToolExecutor {
         // Emit start event
         if let Some(ref bus) = self.bus {
             let data = serde_json::json!({
-                "tool_name": tool_name
+                "tool_name": tool_name,
+                "arguments": params
             });
             bus.publish(EventType::ToolCallStart, data);
         }
@@ -131,9 +169,13 @@ impl ToolExecutor {
 
         // Emit end event
         if let Some(ref bus) = self.bus {
+            let succ = result.as_ref().map(|r| r.success).unwrap_or(false);
+            let content = result.as_ref().map(|r| r.content.clone()).unwrap_or_else(|e| e.to_string());
             let data = serde_json::json!({
                 "tool_name": tool_name,
-                "duration_seconds": elapsed.as_secs_f64()
+                "duration_seconds": elapsed.as_secs_f64(),
+                "success": succ,
+                "result": content
             });
             bus.publish(EventType::ToolCallEnd, data);
         }

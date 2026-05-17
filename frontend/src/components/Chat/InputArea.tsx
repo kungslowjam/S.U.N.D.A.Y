@@ -221,7 +221,6 @@ export function InputArea() {
                 lastFlush = now;
               }
             }
-            if (data.choices?.[0]?.finish_reason === 'stop') break;
           } catch {}
         }
       }

@@ -3,7 +3,7 @@
 use axum::{
     extract::State,
     http::{header, StatusCode, Uri},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
 };
 use std::path::PathBuf;
 
@@ -38,13 +38,19 @@ async fn serve_file(path: &PathBuf) -> Response {
                 header::CONTENT_TYPE,
                 header::HeaderValue::from_str(mime.as_ref()).unwrap(),
             );
-            // No-cache for assets
-            if path.to_string_lossy().contains("assets/") {
-                headers.insert(
-                    header::CACHE_CONTROL,
-                    header::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
-                );
-            }
+            // No-cache for all static files (SPA rebuild safety)
+            headers.insert(
+                header::CACHE_CONTROL,
+                header::HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+            );
+            headers.insert(
+                header::PRAGMA,
+                header::HeaderValue::from_static("no-cache"),
+            );
+            headers.insert(
+                header::EXPIRES,
+                header::HeaderValue::from_static("0"),
+            );
             (headers, content).into_response()
         }
         Err(_) => (StatusCode::NOT_FOUND, "Not found").into_response(),

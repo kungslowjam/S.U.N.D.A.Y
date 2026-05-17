@@ -20,6 +20,7 @@ pub struct NativeReActAgent<M: CompletionModel> {
     agent: rig::agent::Agent<M>,
     executor: Arc<ToolExecutor>,
     max_turns: usize,
+    id: String,
 }
 
 impl<M: CompletionModel> NativeReActAgent<M> {
@@ -51,6 +52,7 @@ impl<M: CompletionModel> NativeReActAgent<M> {
             agent,
             executor,
             max_turns,
+            id: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -84,7 +86,7 @@ impl<M: CompletionModel> NativeReActAgent<M> {
 #[async_trait::async_trait]
 impl<M: CompletionModel + 'static> OjAgent for NativeReActAgent<M> {
     fn agent_id(&self) -> &str {
-        "native_react"
+        &self.id
     }
 
     fn accepts_tools(&self) -> bool {

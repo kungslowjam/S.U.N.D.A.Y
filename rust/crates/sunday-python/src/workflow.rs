@@ -1,11 +1,12 @@
-//! PyO3 bindings for workflow engine.
-
 use pyo3::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
+use crate::RUNTIME;
+use sunday_workflow::{WorkflowGraph, WorkflowEngine, WorkflowNode, WorkflowEdge, NodeType, WorkflowSystem};
 
 #[pyclass(name = "WorkflowGraph")]
 pub struct PyWorkflowGraph {
-    inner: sunday_workflow::WorkflowGraph,
+    pub(crate) inner: WorkflowGraph,
 }
 
 #[pymethods]
@@ -14,114 +15,125 @@ impl PyWorkflowGraph {
     #[pyo3(signature = (name=""))]
     fn new(name: &str) -> Self {
         Self {
-            inner: sunday_workflow::WorkflowGraph::new(name),
+            inner: WorkflowGraph::new(name.to_string()),
         }
     }
 
+    #[pyo3(signature = (id, node_type, agent=None, tools=None, config=None, condition_expr=None, transform_expr=None, max_iterations=None))]
     fn add_node(
         &mut self,
-        id: &str,
+        id: String,
         node_type: &str,
-        agent: &str,
-        tools: Vec<String>,
+        agent: Option<String>,
+        tools: Option<Vec<String>>,
+        config: Option<PyObject>,
+        condition_expr: Option<String>,
+        transform_expr: Option<String>,
+        max_iterations: Option<u32>,
     ) -> PyResult<()> {
         let nt = match node_type {
-            "tool" => sunday_workflow::NodeType::Tool,
-            "condition" => sunday_workflow::NodeType::Condition,
-            "parallel" => sunday_workflow::NodeType::Parallel,
-            "loop" => sunday_workflow::NodeType::Loop,
-            "transform" => sunday_workflow::NodeType::Transform,
-            _ => sunday_workflow::NodeType::Agent,
+            "agent" => NodeType::Agent,
+            "tool" => NodeType::Tool,
+            "condition" => NodeType::Condition,
+            "transform" => NodeType::Transform,
+            "loop" => NodeType::Loop,
+            _ => return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Unknown node type: {}", node_type))),
         };
-        let node = sunday_workflow::WorkflowNode {
-            id: id.to_string(),
+        
+        let config_map = if let Some(c) = config {
+            Python::with_gil(|py| {
+                let json_str: String = py.import("json")?.call_method1("dumps", (c,))?.extract()?;
+                serde_json::from_str(&json_str)
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+            })?
+        } else {
+            HashMap::new()
+        };
+
+        let node = WorkflowNode {
+            id,
             node_type: nt,
-            agent: agent.to_string(),
+            agent,
             tools,
-            config: HashMap::new(),
-            condition_expr: String::new(),
-            max_iterations: 10,
-            transform_expr: String::new(),
+            config: config_map,
+            condition_expr,
+            transform_expr,
+            max_iterations,
         };
-        self.inner
-            .add_node(node)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))
+        
+        self.inner.add_node(node)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
-    fn add_edge(&mut self, source: &str, target: &str) -> PyResult<()> {
-        let edge = sunday_workflow::WorkflowEdge {
-            source: source.to_string(),
-            target: target.to_string(),
-            condition: String::new(),
+    #[pyo3(signature = (source, target, condition=None))]
+    fn add_edge(&mut self, source: String, target: String, condition: Option<String>) -> PyResult<()> {
+        let edge = WorkflowEdge {
+            source,
+            target,
+            condition,
         };
-        self.inner
-            .add_edge(edge)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))
+        self.inner.add_edge(edge)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
-    fn validate(&self) -> (bool, String) {
+    fn validate(&self) -> PyResult<()> {
         self.inner.validate()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 
     fn topological_sort(&self) -> PyResult<Vec<String>> {
-        self.inner
-            .topological_sort()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))
-    }
-
-    fn execution_stages(&self) -> Vec<Vec<String>> {
-        self.inner.execution_stages()
-    }
-
-    fn predecessors(&self, node_id: &str) -> Vec<String> {
-        self.inner.predecessors(node_id)
-    }
-
-    fn successors(&self, node_id: &str) -> Vec<String> {
-        self.inner.successors(node_id)
+        self.inner.topological_sort()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 }
 
-#[pyclass(name = "WorkflowBuilder")]
-pub struct PyWorkflowBuilder {
-    inner: Option<sunday_workflow::WorkflowBuilder>,
+/// Bridge for Python system to implement WorkflowSystem trait
+struct PyWorkflowSystem {
+    py_system: PyObject,
+}
+
+impl WorkflowSystem for PyWorkflowSystem {
+    fn execute_agent(&self, input: &str, agent: Option<&str>, tools: Option<&[String]>) -> anyhow::Result<String> {
+        Python::with_gil(|py| {
+            let res = self.py_system.call_method1(py, "ask", (input, agent, tools))?;
+            let content: String = res.bind(py).get_item("content")?.extract()?;
+            Ok(content)
+        })
+    }
+
+    fn execute_tool(&self, name: &str, args: &str) -> anyhow::Result<String> {
+        Python::with_gil(|py| {
+            let res = self.py_system.call_method1(py, "execute_tool", (name, args))?;
+            let content: String = res.bind(py).extract()?;
+            Ok(content)
+        })
+    }
+}
+
+#[pyclass(name = "WorkflowEngine")]
+pub struct PyWorkflowEngine {
+    inner: WorkflowEngine,
 }
 
 #[pymethods]
-impl PyWorkflowBuilder {
+impl PyWorkflowEngine {
     #[new]
-    #[pyo3(signature = (name=""))]
-    fn new(name: &str) -> Self {
+    #[pyo3(signature = (max_parallel=4))]
+    fn new(max_parallel: usize) -> Self {
         Self {
-            inner: Some(sunday_workflow::WorkflowBuilder::new(name)),
+            inner: WorkflowEngine::new(max_parallel),
         }
     }
 
-    fn add_agent_node(&mut self, id: &str, agent: &str) {
-        if let Some(ref mut b) = self.inner {
-            b.add_agent_node(id, agent);
-        }
-    }
-
-    fn add_tool_node(&mut self, id: &str, tools: Vec<String>) {
-        if let Some(ref mut b) = self.inner {
-            b.add_tool_node(id, tools);
-        }
-    }
-
-    fn connect(&mut self, source: &str, target: &str) {
-        if let Some(ref mut b) = self.inner {
-            b.connect(source, target);
-        }
-    }
-
-    fn build(&mut self) -> PyResult<PyWorkflowGraph> {
-        let builder = self.inner.take().ok_or_else(|| {
-            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>("builder already consumed")
-        })?;
-        let graph = builder
-            .build()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e))?;
-        Ok(PyWorkflowGraph { inner: graph })
+    fn run(&self, graph: &PyWorkflowGraph, py_system: PyObject, initial_input: String) -> PyResult<String> {
+        let system = Arc::new(PyWorkflowSystem { py_system });
+        let engine = &self.inner;
+        let inner_graph = &graph.inner;
+        
+        let result = RUNTIME.block_on(async {
+            engine.run(inner_graph, system, initial_input).await
+        }).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        
+        Ok(serde_json::to_string(&result).unwrap_or_default())
     }
 }

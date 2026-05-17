@@ -9,9 +9,10 @@ use llama_cpp_2::model::LlamaModel;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::sampling::LlamaSampler;
 
 pub struct NativeLlamaEngine {
-    model: LlamaModel,
+    model: Arc<LlamaModel>,
     backend: Arc<LlamaBackend>,
     model_path: String,
 }
@@ -27,7 +28,7 @@ impl NativeLlamaEngine {
             .map_err(|e| SUNDAYError::Engine(EngineError::Initialization(format!("Failed to load model: {}", e))))?;
         
         Ok(Self {
-            model,
+            model: Arc::new(model),
             backend,
             model_path: model_path.to_string(),
         })
@@ -65,6 +66,30 @@ impl NativeLlamaEngine {
         prompt.push_str("<|assistant|>\n");
         prompt
     }
+
+    fn build_sampler_static(temperature: f64, top_p: f64, top_k: i64, repeat_penalty: f64) -> LlamaSampler {
+        let mut samplers = Vec::new();
+        samplers.push(LlamaSampler::penalties(64, repeat_penalty as f32, 0.0, 0.0));
+        if temperature > 0.0 {
+            samplers.push(LlamaSampler::top_k(top_k as i32));
+            samplers.push(LlamaSampler::top_p(top_p as f32, 1));
+            samplers.push(LlamaSampler::temp(temperature as f32));
+            samplers.push(LlamaSampler::dist(42));
+        } else {
+            samplers.push(LlamaSampler::greedy());
+        }
+        LlamaSampler::chain(samplers, true)
+    }
+}
+
+impl Clone for NativeLlamaEngine {
+    fn clone(&self) -> Self {
+        Self {
+            model: self.model.clone(),
+            backend: self.backend.clone(),
+            model_path: self.model_path.clone(),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -82,7 +107,6 @@ impl InferenceEngine for NativeLlamaEngine {
         _extra: Option<&Value>,
     ) -> Result<GenerateResult, SUNDAYError> {
         use llama_cpp_2::llama_batch::LlamaBatch;
-        use llama_cpp_2::token::data_array::LlamaTokenDataArray;
         use llama_cpp_2::model::AddBos;
 
         emit_event(EventType::InferenceStart, serde_json::json!({
@@ -119,10 +143,13 @@ impl InferenceEngine for NativeLlamaEngine {
         let mut n_predict = 0;
         let mut decoder = encoding_rs::UTF_8.new_decoder();
 
+        let top_p = _extra.and_then(|e| e.get("top_p").and_then(|v| v.as_f64())).unwrap_or(0.9);
+        let top_k = _extra.and_then(|e| e.get("top_k").and_then(|v| v.as_i64())).unwrap_or(40);
+        let repeat_penalty = _extra.and_then(|e| e.get("repetition_penalty").and_then(|v| v.as_f64())).unwrap_or(1.0);
+        let mut sampler = Self::build_sampler_static(_temperature, top_p, top_k, repeat_penalty);
+
         while n_predict < max_tokens {
-            let candidates = ctx.candidates_ith(batch.n_tokens() as i32 - 1);
-            let mut candidates_p = LlamaTokenDataArray::from_iter(candidates, false);
-            let token = candidates_p.sample_token_greedy();
+            let token = sampler.sample(&ctx, batch.n_tokens() as i32 - 1);
 
             if self.model.is_eog_token(token) {
                 break;
@@ -133,6 +160,7 @@ impl InferenceEngine for NativeLlamaEngine {
             output.push_str(&token_str);
 
             n_predict += 1;
+            sampler.accept(token);
 
             batch.clear();
             let _ = batch.add(token, (n_tokens + n_predict as usize - 1) as i32, &[0], true);
@@ -163,15 +191,116 @@ impl InferenceEngine for NativeLlamaEngine {
         Ok(result)
     }
 
+
     async fn stream(
         &self,
-        _messages: &[Message],
+        messages: &[Message],
         _model: &str,
-        _temperature: f64,
-        _max_tokens: i64,
-        _extra: Option<&Value>,
+        temperature: f64,
+        max_tokens: i64,
+        extra: Option<&Value>,
     ) -> Result<TokenStream, SUNDAYError> {
-        Err(SUNDAYError::Engine(EngineError::NotImplemented("Native streaming not yet implemented".into())))
+        use llama_cpp_2::llama_batch::LlamaBatch;
+        use llama_cpp_2::model::AddBos;
+        use tokio::sync::mpsc;
+        use tokio_stream::wrappers::ReceiverStream;
+
+        let (tx, rx) = mpsc::channel(100);
+        let engine = self.clone();
+        let prompt = Self::messages_to_prompt(messages);
+        
+        let top_p = extra.and_then(|e| e.get("top_p").and_then(|v| v.as_f64())).unwrap_or(0.9);
+        let top_k = extra.and_then(|e| e.get("top_k").and_then(|v| v.as_i64())).unwrap_or(40);
+        let repeat_penalty = extra.and_then(|e| e.get("repetition_penalty").and_then(|v| v.as_f64())).unwrap_or(1.0);
+
+        tokio::task::spawn_blocking(move || {
+            let ctx_params = LlamaContextParams::default();
+            let mut ctx = match engine.model.new_context(&engine.backend, ctx_params) {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(SUNDAYError::Engine(EngineError::Initialization(e.to_string()))));
+                    return;
+                }
+            };
+
+            let tokens = match engine.model.str_to_token(&prompt, AddBos::Always) {
+                Ok(t) => t,
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(SUNDAYError::Engine(EngineError::Generation(e.to_string()))));
+                    return;
+                }
+            };
+
+            let n_ctx = ctx.n_ctx() as usize;
+            let n_tokens = tokens.len();
+            if n_tokens > n_ctx {
+                let _ = tx.blocking_send(Err(SUNDAYError::Engine(EngineError::Generation("Prompt too long".into()))));
+                return;
+            }
+
+            let mut batch = LlamaBatch::new(512, 1);
+            for (i, &token) in tokens.iter().enumerate() {
+                let is_last = i == n_tokens - 1;
+                let _ = batch.add(token, i as i32, &[0], is_last);
+            }
+
+            if let Err(e) = ctx.decode(&mut batch) {
+                let _ = tx.blocking_send(Err(SUNDAYError::Engine(EngineError::Generation(e.to_string()))));
+                return;
+            }
+
+            let mut n_predict = 0;
+            let mut decoder = encoding_rs::UTF_8.new_decoder();
+            let mut sampler = NativeLlamaEngine::build_sampler_static(temperature, top_p, top_k, repeat_penalty);
+
+            while n_predict < max_tokens {
+                let token = sampler.sample(&ctx, batch.n_tokens() as i32 - 1);
+                if engine.model.is_eog_token(token) { break; }
+
+                let token_str = match engine.model.token_to_piece(token, &mut decoder, false, None) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        let _ = tx.blocking_send(Err(SUNDAYError::Engine(EngineError::Generation(e.to_string()))));
+                        return;
+                    }
+                };
+
+                let chunk = serde_json::json!({
+                    "id": format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+                    "object": "chat.completion.chunk",
+                    "created": chrono::Utc::now().timestamp(),
+                    "model": engine.model_path,
+                    "choices": [{
+                        "index": 0,
+                        "delta": { "content": token_str },
+                        "finish_reason": null
+                    }]
+                });
+
+                if tx.blocking_send(Ok(chunk)).is_err() { break; }
+
+                n_predict += 1;
+                sampler.accept(token);
+                batch.clear();
+                let _ = batch.add(token, (n_tokens + n_predict as usize - 1) as i32, &[0], true);
+                if let Err(_) = ctx.decode(&mut batch) { break; }
+            }
+
+            let final_chunk = serde_json::json!({
+                "id": format!("chatcmpl-{}", uuid::Uuid::new_v4()),
+                "object": "chat.completion.chunk",
+                "created": chrono::Utc::now().timestamp(),
+                "model": engine.model_path,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            });
+            let _ = tx.blocking_send(Ok(final_chunk));
+        });
+
+        Ok(Box::pin(ReceiverStream::new(rx)))
     }
 
     fn list_models(&self) -> Result<Vec<String>, SUNDAYError> {

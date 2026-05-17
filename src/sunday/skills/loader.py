@@ -155,6 +155,32 @@ def load_skill_markdown(path: str | Path) -> SkillManifest:
     path = Path(path)
     raw = path.read_text(encoding="utf-8")
 
+    try:
+        from sunday._rust_bridge import parse_skill_markdown
+        rust_manifest = parse_skill_markdown(raw)
+        
+        import json
+        metadata = json.loads(rust_manifest.metadata_json)
+        
+        from sunday.skills.types import SkillManifest
+        
+        # Convert Rust's manifest to Python's SkillManifest
+        return SkillManifest(
+            name=rust_manifest.name,
+            version=rust_manifest.version,
+            description=rust_manifest.description,
+            author=rust_manifest.author,
+            required_capabilities=rust_manifest.required_capabilities,
+            tags=rust_manifest.tags,
+            depends=rust_manifest.depends,
+            user_invocable=rust_manifest.user_invocable,
+            disable_model_invocation=rust_manifest.disable_model_invocation,
+            markdown_content=rust_manifest.markdown_content,
+            metadata=metadata,
+        )
+    except Exception as exc:
+        LOGGER.debug("Rust parse_skill_markdown failed or unavailable, falling back to python parser: %s", exc)
+
     frontmatter: dict = {}
     markdown_content = raw
 

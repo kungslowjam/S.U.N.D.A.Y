@@ -354,3 +354,63 @@ impl PyKnowledgeGraphMemory {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))
     }
 }
+#[pyclass(name = "MdChunk")]
+#[derive(Clone)]
+pub struct PyMdChunk {
+    #[pyo3(get)]
+    pub content: String,
+    #[pyo3(get)]
+    pub source: String,
+    #[pyo3(get)]
+    pub breadcrumb: String,
+    #[pyo3(get)]
+    pub start_line: usize,
+}
+
+#[pyfunction]
+#[pyo3(signature = (text, source="", max_section_tokens=500, paragraph_overlap_tokens=50, max_section_chars=4000))]
+pub fn chunk_markdown(
+    text: &str,
+    source: &str,
+    max_section_tokens: usize,
+    paragraph_overlap_tokens: usize,
+    max_section_chars: usize,
+) -> Vec<PyMdChunk> {
+    sunday_memory::chunk_markdown(text, source, max_section_tokens, paragraph_overlap_tokens, max_section_chars)
+        .into_iter()
+        .map(|c| PyMdChunk {
+            content: c.content,
+            source: c.source,
+            breadcrumb: c.breadcrumb,
+            start_line: c.start_line,
+        })
+        .collect()
+}
+
+#[pyfunction]
+#[pyo3(signature = (chunks, ngram_n=5, similarity_threshold=0.7, min_files_for_dup=3))]
+pub fn dedupe_chunks(
+    chunks: Vec<PyMdChunk>,
+    ngram_n: usize,
+    similarity_threshold: f32,
+    min_files_for_dup: usize,
+) -> PyResult<(Vec<PyMdChunk>, String)> {
+    let core_chunks = chunks.iter().map(|c| sunday_memory::MdChunk {
+        content: c.content.clone(),
+        source: c.source.clone(),
+        breadcrumb: c.breadcrumb.clone(),
+        start_line: c.start_line,
+    }).collect();
+
+    let (survivors, report) = sunday_memory::dedupe_chunks(core_chunks, ngram_n, similarity_threshold, min_files_for_dup);
+    
+    let py_survivors = survivors.into_iter().map(|c| PyMdChunk {
+        content: c.content,
+        source: c.source,
+        breadcrumb: c.breadcrumb,
+        start_line: c.start_line,
+    }).collect();
+
+    let report_json = serde_json::to_string(&report).unwrap_or_default();
+    Ok((py_survivors, report_json))
+}

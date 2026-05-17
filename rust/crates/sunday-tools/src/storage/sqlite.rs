@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 pub struct SQLiteMemory {
-    conn: Mutex<Connection>,
+    pool: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
     _db_path: PathBuf,
 }
 
@@ -34,11 +34,8 @@ impl SQLiteMemory {
             })?;
         }
 
-        let conn = Connection::open(db_path).map_err(|e| {
-            SUNDAYError::Io(std::io::Error::other(
-                e.to_string(),
-            ))
-        })?;
+        let pool = crate::storage::pool::get_sqlite_pool(db_path)?;
+        let conn = pool.get().map_err(|e| SUNDAYError::Io(std::io::Error::other(e.to_string())))?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS documents (
@@ -86,7 +83,7 @@ impl SQLiteMemory {
         }
 
         Ok(Self {
-            conn: Mutex::new(conn),
+            pool,
             _db_path: db_path.to_path_buf(),
         })
     }
@@ -112,7 +109,7 @@ impl MemoryBackend for SQLiteMemory {
             metadata.map(|m| serde_json::to_string(m).unwrap_or_default())
                 .unwrap_or_else(|| "{}".to_string());
 
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| SUNDAYError::Io(std::io::Error::other(e.to_string())))?;
         conn.execute(
             "INSERT INTO documents (id, content, source, metadata) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![doc_id, content, source, meta_str],
@@ -142,7 +139,7 @@ impl MemoryBackend for SQLiteMemory {
         query: &str,
         top_k: usize,
     ) -> Result<Vec<RetrievalResult>, SUNDAYError> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| SUNDAYError::Io(std::io::Error::other(e.to_string())))?;
 
         let words: Vec<String> = query
             .split_whitespace()
@@ -196,7 +193,7 @@ impl MemoryBackend for SQLiteMemory {
     }
 
     fn delete(&self, doc_id: &str) -> Result<bool, SUNDAYError> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| SUNDAYError::Io(std::io::Error::other(e.to_string())))?;
         // Delete from FTS5 using the rowid from the documents table
         conn.execute(
             "DELETE FROM documents_fts WHERE rowid = (SELECT rowid FROM documents WHERE id = ?1)",
@@ -221,7 +218,7 @@ impl MemoryBackend for SQLiteMemory {
     }
 
     fn clear(&self) -> Result<(), SUNDAYError> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| SUNDAYError::Io(std::io::Error::other(e.to_string())))?;
         conn.execute_batch("DELETE FROM documents_fts; DELETE FROM documents")
             .map_err(|e| {
                 SUNDAYError::Io(std::io::Error::other(
@@ -232,7 +229,7 @@ impl MemoryBackend for SQLiteMemory {
     }
 
     fn count(&self) -> Result<usize, SUNDAYError> {
-        let conn = self.conn.lock();
+        let conn = self.pool.get().map_err(|e| SUNDAYError::Io(std::io::Error::other(e.to_string())))?;
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))
             .map_err(|e| {

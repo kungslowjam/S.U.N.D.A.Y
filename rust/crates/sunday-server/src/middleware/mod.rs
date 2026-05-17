@@ -2,12 +2,12 @@
 
 use axum::{
     extract::Request,
-    http::StatusCode,
+    http::{header, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use tower_http::{
-    cors::{Any, CorsLayer},
+    cors::CorsLayer,
 };
 
 /// CORS layer allowing frontend origins.
@@ -21,14 +21,46 @@ pub fn cors_layer() -> CorsLayer {
             "https://tauri.localhost".parse().unwrap(),
         ])
         .allow_credentials(true)
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::PATCH,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            header::ACCEPT,
+            header::ACCEPT_LANGUAGE,
+            header::CONTENT_LANGUAGE,
+        ])
 }
 
-/// Security headers middleware — simple tower layer.
-pub fn security_headers_layer() -> tower::layer::util::Identity {
-    // For now, return identity layer. Full security headers can be added via a custom middleware.
-    tower::layer::util::Identity::new()
+/// Security headers middleware — adds common security headers to all responses.
+pub async fn security_headers_middleware(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        "x-frame-options",
+        HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        "x-xss-protection",
+        HeaderValue::from_static("1; mode=block"),
+    );
+    headers.insert(
+        "referrer-policy",
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
+
+    response
 }
 
 /// Auth middleware — validates Bearer token on protected routes.
@@ -42,7 +74,9 @@ pub async fn auth_middleware(request: Request, next: Next) -> Response {
 
     // Only enforce on API routes
     if path.starts_with("/v1/") || path.starts_with("/api/") {
-        let api_key = std::env::var("OPENSUNDAY_API_KEY").ok();
+        let api_key = std::env::var("OPENSUNDAY_API_KEY")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         // If no key configured, skip auth (but warn on non-loopback)
         if api_key.is_none() {

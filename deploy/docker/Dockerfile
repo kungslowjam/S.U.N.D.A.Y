@@ -1,4 +1,10 @@
+# Multi-stage build for SUNDAY Rust Backend
+#
+# Replaces the legacy Python FastAPI server with the native Rust Axum server.
+
+# ---------------------------------------------------------------------------
 # Stage 1: Build frontend SPA
+# ---------------------------------------------------------------------------
 FROM node:22-slim AS frontend
 
 WORKDIR /frontend
@@ -7,27 +13,47 @@ RUN npm ci --ignore-scripts 2>/dev/null || npm install
 COPY frontend/ .
 RUN npm run build
 
-# Stage 2: Build Python package
-FROM python:3.12-slim-bookworm AS builder
+# ---------------------------------------------------------------------------
+# Stage 2: Build Rust workspace
+# ---------------------------------------------------------------------------
+FROM rust:1.85-slim-bookworm AS rust-builder
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
-COPY src/ src/
+COPY rust/Cargo.toml rust/Cargo.lock ./rust/
+COPY rust/crates/ ./rust/crates/
+COPY configs/ ./configs/
 
-# Copy built frontend into the server static directory
-COPY --from=frontend /src/openjarvis/server/static src/openjarvis/server/static/
+# Build the release binary
+RUN cd rust && cargo build --release -p sunday-server
 
-RUN pip install --no-cache-dir uv && \
-    uv pip install --system ".[server]"
-
+# ---------------------------------------------------------------------------
 # Stage 3: Runtime
-FROM python:3.12-slim-bookworm
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim
 
-COPY --from=builder /usr/local /usr/local
-COPY --from=builder /app /app
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+
+# Copy Rust binary
+COPY --from=rust-builder /app/rust/target/release/sunday-server /usr/local/bin/sunday-server
+
+# Copy frontend build for static serving
+COPY --from=frontend /frontend/dist /app/frontend/dist
+
+# Copy default config
+COPY --from=rust-builder /app/configs/sunday/config.toml /app/configs/sunday/config.toml
+
+ENV SUNDAY_HOST=0.0.0.0
+ENV SUNDAY_PORT=8000
 
 EXPOSE 8000
 
-ENTRYPOINT ["jarvis"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["sunday-server"]

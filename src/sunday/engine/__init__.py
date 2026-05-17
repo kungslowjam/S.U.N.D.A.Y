@@ -6,6 +6,7 @@ import importlib
 
 # Import engine modules to trigger @EngineRegistry.register() decorators
 import sunday.engine.ollama  # noqa: F401
+import sunday.engine.native  # noqa: F401
 import sunday.engine.openai_compat_engines  # noqa: F401
 from sunday.engine._base import (
     EngineConnectionError,

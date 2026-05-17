@@ -567,3 +567,53 @@ class TestSkillManagerRemove:
         mgr = SkillManager(bus=EventBus())
         with pytest.raises(FileNotFoundError):
             mgr.remove("ghost", roots=[tmp_path])
+
+
+
+class TestSkillManagerProjectDiscovery:
+    def test_discover_project_skills_finds_skill_md(self, tmp_path: Path) -> None:
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        skill_dir = repo / "skills" / "greet"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: greet\ndescription: Say hello\n---\nSay hello."
+        )
+
+        mgr = SkillManager(bus=EventBus())
+        names = mgr.discover_project_skills(cwd=repo)
+        assert "greet" in names
+        assert mgr.resolve("greet").description == "Say hello"
+
+    def test_discover_project_skills_skips_outside_project(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # No project markers → no skills discovered
+        monkeypatch.setattr(
+            "sunday.core.project_context.ProjectContextLoader._find_project_root",
+            staticmethod(lambda dirs: None),
+        )
+        mgr = SkillManager(bus=EventBus())
+        names = mgr.discover_project_skills(cwd=tmp_path)
+        assert names == []
+
+    def test_discover_project_skills_does_not_overwrite_existing(
+        self, tmp_path: Path
+    ) -> None:
+        from sunday.skills.types import SkillManifest
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".git").mkdir()
+        skill_dir = repo / "skills" / "greet"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: greet\ndescription: New\n---\nNew."
+        )
+
+        mgr = SkillManager(bus=EventBus())
+        mgr._skills["greet"] = SkillManifest(name="greet", description="Existing")
+        names = mgr.discover_project_skills(cwd=repo)
+        assert names == []  # not re-registered
+        assert mgr.resolve("greet").description == "Existing"

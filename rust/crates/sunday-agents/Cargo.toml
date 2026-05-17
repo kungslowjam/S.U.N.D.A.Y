@@ -18,3 +18,4 @@ parking_lot = { workspace = true }
 rig-core = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }

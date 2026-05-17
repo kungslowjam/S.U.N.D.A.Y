@@ -1,5 +1,6 @@
 //! Visual regression checking — SSIM computation and screenshot management.
 
+#[cfg(test)]
 use image::DynamicImage;
 use std::path::{Path, PathBuf};
 

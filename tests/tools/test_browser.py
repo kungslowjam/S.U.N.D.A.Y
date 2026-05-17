@@ -545,8 +545,8 @@ class TestBrowserScreenshotTool:
         assert result.success is True
         assert "Screenshot taken" in result.content
         assert "full page" not in result.content
-        expected_b64 = base64.b64encode(fake_png).decode("utf-8")
-        assert result.metadata["screenshot_base64"] == expected_b64
+        assert "screenshot_path" in result.metadata
+        assert result.metadata["screenshot_path"].startswith("file://")
         page.screenshot.assert_called_once_with(full_page=False)
 
     def test_execute_screenshot_full_page(self):

@@ -6,8 +6,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OPENSUNDAY_ENGINE_DEFAULT=ollama
+      - SUNDAY_HOST=0.0.0.0
+      - SUNDAY_PORT=8000
       - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - sunday-config:/app/configs/sunday
+      - sunday-models:/app/llama-cpp/models
     depends_on:
       ollama:
         condition: service_healthy
@@ -29,3 +33,5 @@ services:
 
 volumes:
   ollama-models:
+  sunday-config:
+  sunday-models:

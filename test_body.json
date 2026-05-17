@@ -1,0 +1,10 @@
+{
+  "model": "native",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello"
+    }
+  ],
+  "stream": true
+}

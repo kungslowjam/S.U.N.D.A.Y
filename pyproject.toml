@@ -72,12 +72,6 @@ memory-colbert = [
 ]
 memory-pdf = ["pdfplumber>=0.10"]
 memory-bm25 = ["rank-bm25>=0.2.2"]
-server = [
-    "fastapi>=0.110",
-    "uvicorn>=0.30",
-    "pydantic>=2.0",
-    "python-multipart>=0.0.9",
-]
 openhands = ["openhands-sdk>=1.0; python_version >= '3.12'"]
 gpu-metrics = ["pynvml>=12.0"]
 energy-amd = ["amdsmi>=6.1"]
@@ -150,7 +144,7 @@ Repository = "https://github.com/sunday-ai/SUNDAY"
 Issues = "https://github.com/sunday-ai/SUNDAY/issues"
 
 [project.scripts]
-sunday = "sunday.cli:main"
+sunday = "sunday.cli_wrapper:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sunday"]

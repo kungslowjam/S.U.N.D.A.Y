@@ -1,4 +1,4 @@
-"""Calculator tool — safe math evaluation via ``ast`` module."""
+"""Calculator tool — safe math evaluation via Rust backend."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from sunday.core.registry import ToolRegistry
 from sunday.core.types import ToolResult
 from sunday.tools._stubs import BaseTool, ToolSpec
 
-# Allowed binary operators
+# Allowed binary operators (Python fallback)
 _BINOPS = {
     ast.Add: operator.add,
     ast.Sub: operator.sub,
@@ -22,13 +22,13 @@ _BINOPS = {
     ast.Pow: operator.pow,
 }
 
-# Allowed unary operators
+# Allowed unary operators (Python fallback)
 _UNARYOPS = {
     ast.UAdd: operator.pos,
     ast.USub: operator.neg,
 }
 
-# Allowed math functions (safe subset)
+# Allowed math functions (Python fallback)
 _MATH_FUNCS = {
     "abs": abs,
     "round": round,

@@ -7,12 +7,14 @@ use serde_json::json;
 use crate::state::AppState;
 
 pub async fn handler(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let engine_healthy = state.engine.health();
+    let engine = state.engine.read().await;
+    let engine_healthy = engine.health();
+    let model = state.model.read().await;
 
     Json(json!({
         "status": if engine_healthy { "healthy" } else { "degraded" },
-        "engine": state.engine.engine_id(),
-        "model": state.model,
+        "engine": engine.engine_id(),
+        "model": *model,
         "timestamp": chrono::Utc::now().to_rfc3339(),
     }))
 }

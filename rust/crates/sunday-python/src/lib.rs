@@ -14,6 +14,7 @@ pub mod agents;
 pub mod bench;
 pub mod core;
 pub mod engine;
+pub mod harness;
 pub mod learning;
 pub mod mcp;
 pub mod recipes;
@@ -93,17 +94,37 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<agents::PyMonitorOperativeAgent>()?;
     m.add_class::<agents::PyLoopGuard>()?;
 
+    // --- Agent parsing utilities ---
+    m.add_function(wrap_pyfunction!(agents::parse_structured_response, m)?)?;
+    m.add_function(wrap_pyfunction!(agents::extract_tool_call, m)?)?;
+    m.add_function(wrap_pyfunction!(agents::strip_think_tags, m)?)?;
+    m.add_function(wrap_pyfunction!(agents::to_slack_fmt, m)?)?;
+    m.add_function(wrap_pyfunction!(agents::clean_browser_text, m)?)?;
+    m.add_function(wrap_pyfunction!(agents::compress_tool_outputs, m)?)?;
+    m.add_function(wrap_pyfunction!(agents::apply_window, m)?)?;
+
+    // --- Skill auto-creation & user modeling ---
+    m.add_class::<agents::PySkillAutoCreator>()?;
+    m.add_function(wrap_pyfunction!(agents::analyze_conversation_for_skill, m)?)?;
+    m.add_function(wrap_pyfunction!(agents::generate_skill_manifest, m)?)?;
+    m.add_class::<agents::PyUserModelStore>()?;
+
     // --- Tools ---
     m.add_class::<tools::PyToolExecutor>()?;
     m.add_class::<tools::PyCalculatorTool>()?;
     m.add_class::<tools::PyThinkTool>()?;
     m.add_class::<tools::PyFileReadTool>()?;
     m.add_class::<tools::PyFileWriteTool>()?;
+    m.add_class::<tools::PyListDirectoryTool>()?;
     m.add_class::<tools::PyShellExecTool>()?;
     m.add_class::<tools::PyHttpRequestTool>()?;
     m.add_class::<tools::PyGitStatusTool>()?;
     m.add_class::<tools::PyGitDiffTool>()?;
     m.add_class::<tools::PyGitLogTool>()?;
+    m.add_class::<tools::PyApplyPatchTool>()?;
+    m.add_class::<tools::PySemanticScholarSearchTool>()?;
+    m.add_class::<tools::PyArxivSearchTool>()?;
+    m.add_class::<tools::PyOpenAlexSearchTool>()?;
     m.add_class::<tools::PyAXTreeProcessor>()?;
     m.add_class::<tools::PyNativeBrowser>()?;
     m.add_class::<tools::PyNativeMiner>()?;
@@ -115,6 +136,9 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<storage::PyColBERTMemory>()?;
     m.add_class::<storage::PyHybridMemory>()?;
     m.add_class::<storage::PyKnowledgeGraphMemory>()?;
+    m.add_class::<storage::PyMdChunk>()?;
+    m.add_function(wrap_pyfunction!(storage::chunk_markdown, m)?)?;
+    m.add_function(wrap_pyfunction!(storage::dedupe_chunks, m)?)?;
 
     // --- Security ---
     m.add_class::<security::PySecretScanner>()?;
@@ -152,6 +176,7 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<learning::PySFTRouterPolicy>()?;
     m.add_class::<learning::PyHeuristicRewardFunction>()?;
     m.add_class::<learning::PySkillDiscovery>()?;
+    m.add_class::<learning::PySkillEvolutionEngine>()?;
     m.add_class::<learning::PyTraceDrivenPolicy>()?;
     m.add_class::<learning::PyAgentAdvisorPolicy>()?;
     m.add_class::<learning::PyICLUpdaterPolicy>()?;
@@ -168,7 +193,7 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // --- Workflow ---
     m.add_class::<workflow::PyWorkflowGraph>()?;
-    m.add_class::<workflow::PyWorkflowBuilder>()?;
+    m.add_class::<workflow::PyWorkflowEngine>()?;
 
     // --- Skills ---
     m.add_class::<skills::PySkillManifest>()?;
@@ -193,6 +218,19 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<bench::PyThroughputBenchmark>()?;
     m.add_class::<bench::PyEnergyBenchmark>()?;
 
+    // --- Harness ---
+    m.add_class::<harness::PyHarnessConfig>()?;
+    m.add_class::<harness::PyAssertion>()?;
+    m.add_class::<harness::PyAssertionType>()?;
+    m.add_class::<harness::PyAssertionResult>()?;
+    m.add_class::<harness::PyTestResult>()?;
+    m.add_class::<harness::PyPerformanceTracker>()?;
+    m.add_class::<harness::PyVisualRegressionChecker>()?;
+    m.add_class::<harness::PyBootOrchestrator>()?;
+    m.add_class::<harness::PySkillHarness>()?;
+    m.add_function(wrap_pyfunction!(harness::evaluate_assertions, m)?)?;
+    m.add_function(wrap_pyfunction!(harness::all_required_passed, m)?)?;
+
     // --- System ---
     m.add_class::<system::PyJarvisSystem>()?;
     m.add_class::<system::PySystemBuilder>()?;
@@ -202,6 +240,9 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<system::PyAgentRuntime>()?;
     m.add_class::<system::PyScheduling>()?;
 
+    // --- Mining ---
+    m.add_class::<sunday_mining::NativeMiner>()?;
+
     // --- Module-level functions ---
     m.add_function(wrap_pyfunction!(load_config, m)?)?;
     m.add_function(wrap_pyfunction!(detect_hardware, m)?)?;
@@ -210,6 +251,7 @@ fn sunday_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(register_builtin_models, m)?)?;
     m.add_function(wrap_pyfunction!(classify_query, m)?)?;
     m.add_function(wrap_pyfunction!(skills::load_skill, m)?)?;
+    m.add_function(wrap_pyfunction!(skills::parse_skill_markdown, m)?)?;
     m.add_function(wrap_pyfunction!(recipes::load_recipe, m)?)?;
     m.add_function(wrap_pyfunction!(templates::load_template, m)?)?;
     m.add_function(wrap_pyfunction!(a2a::parse_a2a_request, m)?)?;

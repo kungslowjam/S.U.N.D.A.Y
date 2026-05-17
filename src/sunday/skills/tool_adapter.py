@@ -140,14 +140,19 @@ class SkillTool(BaseTool):
         collect the last step's output.  If ``markdown_content`` is present,
         append it to the content.  Returns a combined :class:`ToolResult`.
         """
+        import uuid
+
         tool_name = self.spec.name
         content_parts: List[str] = []
+        trace_id = str(uuid.uuid4())
 
         if self._manifest.steps:
             # Build initial context from all supplied params
             initial_ctx: Dict[str, Any] = {k: v for k, v in params.items()}
 
-            result = self._executor.run(self._manifest, initial_context=initial_ctx)
+            result = self._executor.run(
+                self._manifest, initial_context=initial_ctx, trace_id=trace_id
+            )
 
             if not result.success:
                 # Propagate failure immediately
@@ -178,6 +183,19 @@ class SkillTool(BaseTool):
                     else last_step.content
                 )
                 content_parts.append(str(last_output))
+        else:
+            # Instruction-only skill: record a trivial success outcome so the
+            # evolution engine still sees the invocation.
+            try:
+                from sunday._rust_bridge import get_skill_evolution_engine
+
+                engine = get_skill_evolution_engine()
+                if engine is not None:
+                    engine.record_skill_outcome(
+                        self._manifest.name, trace_id, True
+                    )
+            except Exception:
+                pass
 
         # Append markdown content if present (hybrid or instruction-only)
         if self._manifest.markdown_content:

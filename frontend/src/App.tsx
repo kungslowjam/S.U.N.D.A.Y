@@ -9,6 +9,7 @@ import { AgentsPage } from './pages/AgentsPage';
 import { DataSourcesPage } from './pages/DataSourcesPage';
 import { LogsPage } from './pages/LogsPage';
 import { SkillsPage } from './pages/SkillsPage';
+import { CommandCenterPage } from './pages/CommandCenterPage';
 import { CommandPalette } from './components/CommandPalette';
 import { SetupScreen } from './components/SetupScreen';
 import { Toaster } from './components/ui/sonner';
@@ -58,26 +59,46 @@ export default function App() {
   // Fetch models and bind the active selector to the model actually served by
   // the backend. /v1/models is a catalog; /v1/info is the running model.
   useEffect(() => {
-    Promise.all([
-      fetchModels().catch(() => []),
-      fetchServerInfo().catch(() => null),
-    ])
-      .then(([m, info]) => {
-        setModels(m);
-        if (info) setServerInfo(info);
-        const runningModel = info?.model || '';
-        if (runningModel) {
-          setSelectedModel(runningModel);
-        } else if (!selectedModel && m.length > 0) {
-          setSelectedModel(m[0].id);
-        }
-      })
-      .catch(() => {
-        setModels([]);
-        setServerInfo(null);
-      })
-      .finally(() => setModelsLoading(false));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    let retryCount = 0;
+    const maxRetries = 15;
+
+    const doFetch = () => {
+      Promise.all([
+        fetchModels().catch(() => ({ models: [] })),
+        fetchServerInfo().catch(() => null),
+      ])
+        .then(([mResponse, info]) => {
+          const m = Array.isArray(mResponse) ? mResponse : (mResponse.models || []);
+          setModels(m);
+          if (info) setServerInfo(info);
+          
+          const runningModel = info?.model || (m.length > 0 ? (typeof m[0] === 'string' ? m[0] : m[0].id) : '');
+          
+          // We consider initialization "done" only if we have both a server info AND at least one model in the list
+          if (runningModel && m.length > 0) {
+            setSelectedModel(runningModel);
+            setModelsLoading(false);
+          } else if (retryCount < maxRetries) {
+            retryCount++;
+            setTimeout(doFetch, 2000);
+          } else {
+            // Fallback: use whatever we have
+            if (runningModel) setSelectedModel(runningModel);
+            setModelsLoading(false);
+          }
+        })
+        .catch(() => {
+          if (retryCount < maxRetries) {
+            retryCount++;
+            setTimeout(doFetch, 2000);
+          } else {
+            setModelsLoading(false);
+          }
+        });
+    };
+
+    doFetch();
+  }, [setModels, setModelsLoading, setSelectedModel, setServerInfo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Poll savings and optionally share to Supabase
   useEffect(() => {
@@ -180,6 +201,7 @@ export default function App() {
           <Route path="agents" element={<AgentsPage />} />
           <Route path="skills" element={<SkillsPage />} />
           <Route path="logs" element={<LogsPage />} />
+          <Route path="command-center" element={<CommandCenterPage />} />
         </Route>
       </Routes>
       <Toaster position="bottom-right" />

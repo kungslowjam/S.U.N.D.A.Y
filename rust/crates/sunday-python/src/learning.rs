@@ -571,3 +571,67 @@ impl PyLearningOrchestrator {
         serde_json::to_string(&result).unwrap_or_default()
     }
 }
+
+
+// --- SkillEvolutionEngine ---
+
+#[pyclass(name = "SkillEvolutionEngine")]
+pub struct PySkillEvolutionEngine {
+    inner: std::sync::Mutex<sunday_learning::SkillEvolutionEngine>,
+}
+
+#[pymethods]
+impl PySkillEvolutionEngine {
+    #[new]
+    #[pyo3(signature = (trace_db_path, output_dir))]
+    fn new(trace_db_path: &str, output_dir: &str) -> PyResult<Self> {
+        let store = std::sync::Arc::new(
+            sunday_traces::TraceStore::new(std::path::Path::new(trace_db_path))
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?,
+        );
+        let engine = sunday_learning::SkillEvolutionEngine::new(store, output_dir)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(Self {
+            inner: std::sync::Mutex::new(engine),
+        })
+    }
+
+    fn process_batch(&self, limit: usize) -> PyResult<String> {
+        let mut engine = self.inner.lock().unwrap();
+        let discovered = engine
+            .process_batch(limit)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(serde_json::to_string(&discovered).unwrap_or_default())
+    }
+
+    fn process_all_pending(&self, batch_size: usize) -> PyResult<String> {
+        let mut engine = self.inner.lock().unwrap();
+        let discovered = engine
+            .process_all_pending(batch_size)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(serde_json::to_string(&discovered).unwrap_or_default())
+    }
+
+    fn record_skill_outcome(&self, name: &str, trace_id: &str, success: bool) -> PyResult<()> {
+        let engine = self.inner.lock().unwrap();
+        engine
+            .record_skill_usage(name, trace_id, success)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(())
+    }
+
+    fn iterate_skills(&self) -> PyResult<String> {
+        let engine = self.inner.lock().unwrap();
+        let iterations = engine
+            .iterate_skills()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(e.to_string()))?;
+        Ok(serde_json::to_string(&iterations).unwrap_or_default())
+    }
+
+    fn get_skill_stats(&self, name: &str) -> PyResult<String> {
+        let engine = self.inner.lock().unwrap();
+        // SkillPerformanceTracker is inside engine; we need to expose it.
+        // For now, return empty object as placeholder — Python side can read disk.
+        Ok("{}".to_string())
+    }
+}

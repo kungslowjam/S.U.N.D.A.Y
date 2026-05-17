@@ -131,34 +131,34 @@ class FileWriteTool(BaseTool):
                 success=False,
             )
 
-        # Create parent directories if requested
-        if create_dirs:
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-            except OSError as exc:
-                return ToolResult(
-                    tool_name="file_write",
-                    content=f"Cannot create directories: {exc}",
-                    success=False,
-                )
-        else:
-            if not path.parent.exists():
-                return ToolResult(
-                    tool_name="file_write",
-                    content=(
-                        f"Parent directory does not exist: {path.parent}."
-                        " Set create_dirs=true to create it."
-                    ),
-                    success=False,
-                )
+        # Prefer Rust backend for all modes (write + append)
+        try:
+            from sunday._rust_bridge import get_rust_module
 
-        if mode == "write":
-            try:
-                from sunday._rust_bridge import get_rust_module
-
-                _rust = get_rust_module()
-                _rust.FileWriteTool().execute(str(path), content)
-            except ImportError:
+            _rust = get_rust_module()
+            _rust.FileWriteTool().execute(str(path), content, mode, create_dirs)
+        except ImportError:
+            # Python fallback
+            if create_dirs:
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                except OSError as exc:
+                    return ToolResult(
+                        tool_name="file_write",
+                        content=f"Cannot create directories: {exc}",
+                        success=False,
+                    )
+            else:
+                if not path.parent.exists():
+                    return ToolResult(
+                        tool_name="file_write",
+                        content=(
+                            f"Parent directory does not exist: {path.parent}."
+                            " Set create_dirs=true to create it."
+                        ),
+                        success=False,
+                    )
+            if mode == "write":
                 try:
                     path.write_text(content, encoding="utf-8")
                 except OSError as exc:
@@ -167,29 +167,28 @@ class FileWriteTool(BaseTool):
                         content=f"Write error: {exc}",
                         success=False,
                     )
-            except Exception as exc:
-                return ToolResult(
-                    tool_name="file_write",
-                    content=f"Write error: {exc}",
-                    success=False,
-                )
-        else:
-            # append mode — always Python
-            try:
-                with open(path, "a", encoding="utf-8") as f:
-                    f.write(content)
-            except PermissionError as exc:
-                return ToolResult(
-                    tool_name="file_write",
-                    content=f"Permission denied: {exc}",
-                    success=False,
-                )
-            except OSError as exc:
-                return ToolResult(
-                    tool_name="file_write",
-                    content=f"Write error: {exc}",
-                    success=False,
-                )
+            else:
+                try:
+                    with open(path, "a", encoding="utf-8") as f:
+                        f.write(content)
+                except PermissionError as exc:
+                    return ToolResult(
+                        tool_name="file_write",
+                        content=f"Permission denied: {exc}",
+                        success=False,
+                    )
+                except OSError as exc:
+                    return ToolResult(
+                        tool_name="file_write",
+                        content=f"Write error: {exc}",
+                        success=False,
+                    )
+        except Exception as exc:
+            return ToolResult(
+                tool_name="file_write",
+                content=f"Write error: {exc}",
+                success=False,
+            )
 
         # Get final file size
         try:

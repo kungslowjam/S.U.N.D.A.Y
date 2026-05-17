@@ -28,6 +28,7 @@ sunday-bench = { path = "../sunday-bench" }
 sunday-system = { path = "../sunday-system" }
 sunday-mining = { path = "../sunday-mining", features = ["python"] }
 sunday-sandbox = { path = "../sunday-sandbox", features = ["python"] }
+sunday-harness = { path = "../sunday-harness" }
 pyo3 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -35,3 +36,5 @@ tokio = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
 rayon = { workspace = true }
+anyhow = "1.0.102"
+sunday-memory = { version = "0.1.0", path = "../sunday-memory" }

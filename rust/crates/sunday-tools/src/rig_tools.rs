@@ -414,3 +414,184 @@ impl RigTool for RigGitLogTool {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Crypto Price
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, JsonSchema)]
+pub struct CryptoPriceArgs {
+    /// Cryptocurrency symbol (e.g., btc, eth, bitcoin).
+    pub symbol: String,
+    /// Target currency (e.g., usd, thb). Defaults to usd.
+    pub currency: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("CryptoPrice error: {0}")]
+pub struct CryptoPriceError(String);
+
+pub struct RigCryptoPriceTool;
+
+impl RigTool for RigCryptoPriceTool {
+    type Error = CryptoPriceError;
+    type Args = CryptoPriceArgs;
+    type Output = String;
+
+    const NAME: &'static str = "get_crypto_price";
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "get_crypto_price".into(),
+            description: "Get the current price of a cryptocurrency".into(),
+            parameters: serde_json::to_value(schemars::schema_for!(CryptoPriceArgs)).unwrap_or_default(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        use crate::builtin::crypto::CryptoPriceTool;
+        use crate::traits::BaseTool;
+        let mut params = serde_json::json!({"symbol": args.symbol});
+        if let Some(curr) = args.currency {
+            params["currency"] = serde_json::Value::String(curr);
+        }
+        let result = CryptoPriceTool
+            .execute(&params)
+            .map_err(|e| CryptoPriceError(e.to_string()))?;
+        Ok(result.content)
+    }
+}
+// ---------------------------------------------------------------------------
+// Word Write
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, JsonSchema)]
+pub struct WordWriteArgs {
+    /// The text to write to the document.
+    pub text: String,
+    /// Optional path to save the document.
+    pub path: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("WordWrite error: {0}")]
+pub struct WordWriteError(String);
+
+pub struct RigWordWriteTool;
+
+impl RigTool for RigWordWriteTool {
+    type Error = WordWriteError;
+    type Args = WordWriteArgs;
+    type Output = String;
+
+    const NAME: &'static str = "word_write";
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "word_write".into(),
+            description: "Create or update a Word document with text".into(),
+            parameters: serde_json::to_value(schemars::schema_for!(WordWriteArgs)).unwrap_or_default(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        use crate::builtin::office_tools::WordWriteTool;
+        use crate::traits::BaseTool;
+        let mut params = serde_json::json!({"text": args.text});
+        if let Some(path) = args.path {
+            params["path"] = serde_json::Value::String(path);
+        }
+        let result = WordWriteTool
+            .execute(&params)
+            .map_err(|e| WordWriteError(e.to_string()))?;
+        Ok(result.content)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Excel Read
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ExcelReadArgs {
+    /// Path to the .xlsx file.
+    pub path: String,
+    /// The range to read (e.g., 'A1:B10').
+    pub range: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("ExcelRead error: {0}")]
+pub struct ExcelReadError(String);
+
+pub struct RigExcelReadTool;
+
+impl RigTool for RigExcelReadTool {
+    type Error = ExcelReadError;
+    type Args = ExcelReadArgs;
+    type Output = String;
+
+    const NAME: &'static str = "excel_read";
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "excel_read".into(),
+            description: "Read data from an Excel workbook".into(),
+            parameters: serde_json::to_value(schemars::schema_for!(ExcelReadArgs)).unwrap_or_default(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        use crate::builtin::office_tools::ExcelReadTool;
+        use crate::traits::BaseTool;
+        let mut params = serde_json::json!({"path": args.path});
+        if let Some(range) = args.range {
+            params["range"] = serde_json::Value::String(range);
+        }
+        let result = ExcelReadTool
+            .execute(&params)
+            .map_err(|e| ExcelReadError(e.to_string()))?;
+        Ok(result.content)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Project Create
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ProjectCreateArgs {
+    /// Name of the project folder.
+    pub name: String,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("ProjectCreate error: {0}")]
+pub struct ProjectCreateError(String);
+
+pub struct RigProjectCreateTool;
+
+impl RigTool for RigProjectCreateTool {
+    type Error = ProjectCreateError;
+    type Args = ProjectCreateArgs;
+    type Output = String;
+
+    const NAME: &'static str = "project_create";
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: "project_create".into(),
+            description: "Create a dedicated project folder for a task".into(),
+            parameters: serde_json::to_value(schemars::schema_for!(ProjectCreateArgs)).unwrap_or_default(),
+        }
+    }
+
+    async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
+        use crate::builtin::workspace_tools::ProjectWorkspaceTool;
+        use crate::traits::BaseTool;
+        let params = serde_json::json!({"name": args.name});
+        let result = ProjectWorkspaceTool
+            .execute(&params)
+            .map_err(|e| ProjectCreateError(e.to_string()))?;
+        Ok(result.content)
+    }
+}

@@ -17,6 +17,7 @@ pub mod vllm;
 pub use discovery::{discover_engines, get_engine_static};
 pub use engine_enum::Engine;
 pub use llamacpp::LlamaCppEngine;
+pub use native::NativeLlamaEngine;
 pub use ollama::OllamaEngine;
 pub use openai_compat::OpenAICompatEngine;
 pub use sglang::SGLangEngine;
